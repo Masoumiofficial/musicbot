@@ -5,8 +5,6 @@ if (!defined('ABSPATH')) {
 
 global $wpdb;
 
-require_once __DIR__ . '/files/jdf.php';
-
 
 $apiUrl = 'https://api.wintheme.ir/b2m.php';
 
@@ -18,8 +16,16 @@ if (empty($urlsite)) {
     $urlsite = home_url();
 }
 
-$dir_jalali = jdate_win('Y/m/d', time());
-$dir_wp     = date('Y/m');
+/**
+ * نوع محتوا = پوشه‌ی سطح اول روی هاست دانلود (music | album | video | ...)
+ * این اسکریپت فعلاً فقط تک‌آهنگ ثبت می‌کند؛ اسکریپت‌های دیگر می‌توانند
+ * قبل از include کردن این فایل، مقدار $content_type را تغییر دهند.
+ */
+if (empty($content_type)) {
+    $content_type = 'music';
+}
+
+$dir_wp = date('Y/m');
 
 $arrContextOptions = array(
     "ssl" => array(
@@ -46,6 +52,69 @@ function bm_safe_file_name($text) {
     $text = preg_replace('/\s+/u', ' ', trim($text));
     $text = str_replace(' ', '-', $text);
     return sanitize_file_name($text);
+}
+
+/**
+ * نام فایل روی هاست دانلود (بدون پسوند)
+ * کاراکترهایی که در نام فایل یا URL مشکل‌ساز هستند حذف می‌شوند
+ * مثال: «Mohsen Yeganeh - Nadaramet»
+ */
+function bm_dl_file_name($text) {
+    $text = bm_clean_text($text);
+    $text = preg_replace('/\s+/u', ' ', $text);
+    $text = preg_replace('/[\\\\\/\?#%\*:"<>\|\x00-\x1F]+/u', '', $text);
+    return trim($text, " .-");
+}
+
+/**
+ * نامک انگلیسی خواننده برای پوشه‌ی هاست دانلود
+ * مثال: «Mohsen Yeganeh» => «mohsen-yeganeh»
+ * اگر نام انگلیسی در دسترس نبود (مثلاً فارسی بود)، از نام امن‌شده‌ی همان متن استفاده می‌شود
+ * اگر هیچ چیز قابل استفاده‌ای نبود، رشته‌ی خالی برمی‌گردد
+ */
+function bm_artist_dir_slug($artist_en) {
+    $artist_en = bm_clean_text($artist_en);
+
+    $slug = sanitize_title(remove_accents($artist_en));
+
+    // sanitize_title برای متن غیرلاتین خروجی درصدی (%d9%85...) می‌دهد؛ در این حالت نام امن فایل را به کار می‌بریم
+    if ($slug === '' || preg_match('/[^a-z0-9\-]/', $slug)) {
+        $slug = bm_safe_file_name($artist_en);
+        if (function_exists('mb_strtolower')) {
+            $slug = mb_strtolower($slug, 'UTF-8');
+        }
+    }
+
+    return trim($slug, '-');
+}
+
+/**
+ * پوشه‌ی حرف اول نام خواننده
+ * حروف a-z و ارقام 0-9 همان کاراکتر اول؛ در غیر این صورت «other»
+ * مثال: «mohsen-yeganeh» => «m» | «25band» => «2»
+ */
+function bm_first_letter_dir($slug) {
+    $first = substr((string) $slug, 0, 1);
+    return preg_match('/^[a-z0-9]$/', $first) ? $first : 'other';
+}
+
+/**
+ * مسیر نسبی پوشه‌ی فایل‌ها روی هاست دانلود
+ * ساختار: {نوع محتوا}/{حرف اول}/{نامک خواننده}
+ * مثال: music/m/mohsen-yeganeh
+ */
+function bm_download_dir($content_type, $artist_en) {
+    $content_type = sanitize_key($content_type);
+    if ($content_type === '') {
+        $content_type = 'music';
+    }
+
+    $slug = bm_artist_dir_slug($artist_en);
+    if ($slug === '') {
+        return $content_type . '/other/unknown';
+    }
+
+    return $content_type . '/' . bm_first_letter_dir($slug) . '/' . $slug;
 }
 
 /**
@@ -464,10 +533,19 @@ $post_name   = trim("{$artist_en} {$song_en}");
 $description = trim("دانلود آهنگ {$artist} {$song}");
 $alt         = trim("آهنگ {$artist} {$song}");
 
-$mp3_name = trim("{$artist_en} - {$song_en}");
+$mp3_name = bm_dl_file_name("{$artist_en} - {$song_en}");
 $imgname  = bm_safe_file_name("{$artist_en} {$song_en}");
 
 $post_cover = trailingslashit($urlsite) . "wp-content/uploads/{$dir_wp}/{$imgname}.jpg";
+
+/* -------------------------------------------------------
+ |  4-1) مسیر و نام فایل‌ها روی هاست دانلود
+ |  پوشه:  {نوع محتوا}/{حرف اول}/{نامک خواننده}   مثال: music/m/mohsen-yeganeh
+ |  فایل:  Artist - Song [320].mp3  و  Artist - Song [128].mp3
+ * ------------------------------------------------------ */
+$dl_dir       = bm_download_dir($content_type, $artist_en);
+$mp3_file_320 = "{$mp3_name} [320].mp3";
+$mp3_file_128 = "{$mp3_name} [128].mp3";
 
 /* -------------------------------------------------------
  |  5) جلوگیری از پست تکراری
@@ -571,8 +649,8 @@ $path_320 = '';
 $path_128 = '';
 
 if (!empty($urldlhost)) {
-    $path_320 = trailingslashit($urldlhost) . "{$dir_jalali}/{$mp3_name}.mp3";
-    $path_128 = trailingslashit($urldlhost) . "{$dir_jalali}/{$mp3_name} (128).mp3";
+    $path_320 = trailingslashit($urldlhost) . "{$dl_dir}/{$mp3_file_320}";
+    $path_128 = trailingslashit($urldlhost) . "{$dl_dir}/{$mp3_file_128}";
 }
 
 /* -------------------------------------------------------
@@ -637,7 +715,9 @@ if (!empty($functions_dl_music)) {
         'song_en'   => $song_en,
         'image'     => $imageUrl,
         'mp3_name'  => $mp3_name,
-        'dir_file'  => $dir_jalali,
+        'file_320'  => $mp3_file_320,
+        'file_128'  => $mp3_file_128,
+        'dir_file'  => $dl_dir, // مثال: music/m/mohsen-yeganeh
     ], 300);
 
     // برای بررسی لاگ
@@ -678,6 +758,7 @@ echo 'عنوان: ' . esc_html($mytitle) . '<br>';
 echo 'تصویر شاخص: ' . esc_html($image_result['message']) . '<br>';
 
 if (is_array($download_response)) {
+    echo 'پوشه هاست دانلود: ' . esc_html($dl_dir) . '<br>';
     echo 'دانلود موزیک: ' . ($download_response['success'] ? 'انجام شد' : 'ناموفق') . '<br>';
     if (!$download_response['success'] && !empty($download_response['error'])) {
         echo 'خطای دانلود موزیک: ' . esc_html($download_response['error']) . '<br>';
