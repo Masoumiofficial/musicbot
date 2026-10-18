@@ -215,11 +215,34 @@ function bm_resolve_post_author($configured = '', $auth_user = '') {
  * همگام‌سازی فیلدهای ACF (اگر افزونه فعال باشد) — همان کاری که زدن «به‌روزرسانی» در پیشخوان می‌کند:
  *   - برای فیلدهایی که ربات مقدارشان را ذخیره کرده، کلید مرجع ACF (_name = field_key) ثبت می‌شود تا
  *     get_field() / get_fields() قالب، پست ربات را دقیقاً مثل پست ذخیره‌شده از پیشخوان ببیند
- *   - فیلدهای ساده‌ای که ربات ست نکرده با مقدار پیش‌فرضشان ذخیره می‌شوند (مثل فرم ویرایش)
+ *   - فیلدهای ساده‌ای که ربات ست نکرده با همان مقداری ذخیره می‌شوند که فرم ویرایش ذخیره می‌کرد
+ *     (مقدار پیش‌فرض؛ برای فیلدهای انتخابی بدون پیش‌فرض → گزینه‌ی اول، مثل «نوع اثر» = آهنگ)
+ *   - $overrides (= $bot_acf_values در config.php): نام فیلد → مقدار؛ همیشه با همین مقدار ذخیره می‌شود
  * فیلدهای ترکیبی (repeater/group/flexible/clone) و taxonomy دست نمی‌خورند.
- * خروجی: ['referenced' => [...], 'filled' => [...]] یا null اگر ACF فعال نباشد.
+ * خروجی: ['referenced' => [...], 'filled' => [name => value]] یا null اگر ACF فعال نباشد.
  */
-function bm_acf_sync_post_fields($post_id) {
+function bm_acf_editor_default($field) {
+    // مقدار پیش‌فرض تعریف‌شده در ACF
+    if (isset($field['default_value']) && $field['default_value'] !== '' && $field['default_value'] !== []) {
+        return $field['default_value'];
+    }
+
+    // فیلد انتخابی بدون پیش‌فرض و بدون گزینه‌ی خالی: فرم ویرایش روی گزینه‌ی اول می‌ایستد و همان را ذخیره می‌کند
+    $choice_types = ['select', 'radio', 'button_group'];
+    if (in_array($field['type'], $choice_types, true)
+        && empty($field['allow_null'])
+        && empty($field['multiple'])
+        && !empty($field['choices'])
+        && is_array($field['choices'])
+    ) {
+        reset($field['choices']);
+        return (string) key($field['choices']);
+    }
+
+    return '';
+}
+
+function bm_acf_sync_post_fields($post_id, $overrides = []) {
     if (!function_exists('acf_get_field_groups') || !function_exists('acf_get_fields') || !function_exists('update_field')) {
         return null;
     }
@@ -245,6 +268,13 @@ function bm_acf_sync_post_fields($post_id) {
 
             $name = $field['name'];
 
+            // مقدار تعیین‌شده در config.php همیشه اولویت دارد
+            if (is_array($overrides) && array_key_exists($name, $overrides)) {
+                update_field($field['key'], $overrides[$name], $post_id);
+                $summary['filled'][$name] = $overrides[$name];
+                continue;
+            }
+
             if (metadata_exists('post', $post_id, $name)) {
                 if (get_post_meta($post_id, '_' . $name, true) !== $field['key']) {
                     update_post_meta($post_id, '_' . $name, $field['key']);
@@ -253,9 +283,9 @@ function bm_acf_sync_post_fields($post_id) {
                 continue;
             }
 
-            $default = isset($field['default_value']) ? $field['default_value'] : '';
-            update_field($field['key'], $default, $post_id);
-            $summary['filled'][] = $name;
+            $value = bm_acf_editor_default($field);
+            update_field($field['key'], $value, $post_id);
+            $summary['filled'][$name] = $value;
         }
     }
 
@@ -901,7 +931,7 @@ if (!empty($mood))       update_post_meta($post_id, 'mood', $mood);
  |  11-1) همگام‌سازی با ACF (فقط اگر افزونه فعال باشد)
  |  بعد از متاها و دسته‌ها اجرا می‌شود تا گروه‌های فیلدی که بر اساس دسته نمایش داده می‌شوند هم پیدا شوند.
  * ------------------------------------------------------ */
-$acf_sync = bm_acf_sync_post_fields($post_id);
+$acf_sync = bm_acf_sync_post_fields($post_id, isset($bot_acf_values) && is_array($bot_acf_values) ? $bot_acf_values : []);
 
 /* -------------------------------------------------------
  |  12) ثبت تصویر شاخص
@@ -975,8 +1005,12 @@ $author_user = get_userdata($post_author_id);
 echo 'نویسنده: ' . esc_html($author_user ? $author_user->display_name . ' (' . $author_user->user_login . ' — ID ' . $post_author_id . ')' : 'ID ' . $post_author_id) . '<br>';
 echo 'وضعیت انتشار: ' . ($post_published ? 'منتشر شد' : 'پیش‌نویس ماند — ' . esc_html($publish_error)) . '<br>';
 if (is_array($acf_sync)) {
-    echo 'ACF: ' . count($acf_sync['referenced']) . ' فیلد مرجع‌گذاری شد، ' . count($acf_sync['filled']) . ' فیلد با مقدار پیش‌فرض ذخیره شد'
-        . (!empty($acf_sync['filled']) ? ' (' . esc_html(implode(', ', $acf_sync['filled'])) . ')' : '') . '<br>';
+    $acf_filled = [];
+    foreach ($acf_sync['filled'] as $acf_name => $acf_value) {
+        $acf_filled[] = $acf_name . '=' . (is_scalar($acf_value) ? (string) $acf_value : wp_json_encode($acf_value, JSON_UNESCAPED_UNICODE));
+    }
+    echo 'ACF: ' . count($acf_sync['referenced']) . ' فیلد مرجع‌گذاری شد، ' . count($acf_sync['filled']) . ' فیلد مثل فرم ویرایش ذخیره شد'
+        . (!empty($acf_filled) ? ' (' . esc_html(implode(', ', $acf_filled)) . ')' : '') . '<br>';
 }
 echo 'دسته‌بندی‌ها: ' . esc_html(implode(', ', $post_categories)) . ' (' . ($bot_source === 'manual' ? 'ارسال دستی' : 'ارسال خودکار') . ')<br>';
 
