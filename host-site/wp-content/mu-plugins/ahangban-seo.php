@@ -1,15 +1,18 @@
 <?php
 /**
  * Plugin Name: AhangBan SEO
- * Description: جلوگیری از ایندکس شدن صفحه‌های تگ کم‌محتوا + اسکیمای MusicRecording (JSON-LD) برای پست‌های آهنگ
- * Version:     1.0.0
+ * Description: noindex کردن صفحه‌های تگ (تگ در سایت استفاده نمی‌شود) + اسکیمای MusicRecording (JSON-LD) برای پست‌های آهنگ
+ * Version:     1.1.0
  * Author:      AhangBan
  *
  * محل قرارگیری:  wp-content/mu-plugins/ahangban-seo.php
  * (اگر پوشه mu-plugins وجود ندارد، آن را بسازید. افزونه‌های این پوشه همیشه فعال هستند و نیازی به فعال‌سازی ندارند.)
  *
- * 1) تگ‌هایی که کمتر از AHANGBAN_TAG_MIN_POSTS پست دارند noindex می‌شوند (و از نقشه سایت Rank Math حذف می‌شوند)
- *    تا صفحه‌های تک‌پستی و کم‌ارزش در گوگل ایندکس نشوند.
+ * 1) ربات دیگر به پست‌ها تگ نمی‌دهد (آرشیو خواننده = taxonomy «singer»، «دانلود آهنگ» = دسته‌بندی).
+ *    تگ‌های قدیمی («دانلود آهنگ»، «آهنگ X» و ...) هنوز در سایت هستند؛ این افزونه همه‌ی صفحه‌های تگ را
+ *    noindex می‌کند و از نقشه سایت Rank Math حذف می‌کند تا صفحه‌های تکراری/تک‌پستی در گوگل ایندکس نشوند.
+ *    (اگر روزی خواستید دوباره از تگ استفاده کنید، AHANGBAN_NOINDEX_ALL_TAGS را false کنید؛ در آن حالت
+ *    فقط تگ‌هایی که کمتر از AHANGBAN_TAG_MIN_POSTS پست دارند noindex می‌شوند.)
  * 2) برای هر پست آهنگ (که متاهای song و artist دارد) اسکیمای MusicRecording خروجی می‌دهد:
  *    نام آهنگ، خواننده، سبک، تصویر، فایل صوتی، تاریخ انتشار، آهنگساز/ترانه‌سرا/تنظیم و متن ترانه.
  */
@@ -18,41 +21,50 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-/** حداقل تعداد پست برای اینکه صفحه‌ی یک تگ ایندکس شود */
+/** true = همه‌ی صفحه‌های تگ noindex شوند (تگ در سایت استفاده نمی‌شود) */
+if (!defined('AHANGBAN_NOINDEX_ALL_TAGS')) {
+    define('AHANGBAN_NOINDEX_ALL_TAGS', true);
+}
+
+/** فقط وقتی AHANGBAN_NOINDEX_ALL_TAGS برابر false است: حداقل تعداد پست برای ایندکس شدن صفحه‌ی یک تگ */
 if (!defined('AHANGBAN_TAG_MIN_POSTS')) {
     define('AHANGBAN_TAG_MIN_POSTS', 3);
 }
 
 /* -------------------------------------------------------
- |  1) noindex برای تگ‌های کم‌پست
+ |  1) noindex صفحه‌های تگ
  * ------------------------------------------------------ */
 
 /**
- * آیا صفحه‌ی جاری، آرشیو یک تگ کم‌پست است؟
+ * آیا این تگ باید noindex شود؟
  */
-function ahangban_is_thin_tag_archive() {
-    if (!is_tag()) {
+function ahangban_tag_is_noindex($term) {
+    if (!($term instanceof WP_Term) || $term->taxonomy !== 'post_tag') {
         return false;
     }
 
-    $term = get_queried_object();
+    return AHANGBAN_NOINDEX_ALL_TAGS || (int) $term->count < AHANGBAN_TAG_MIN_POSTS;
+}
 
-    return ($term instanceof WP_Term) && (int) $term->count < AHANGBAN_TAG_MIN_POSTS;
+/**
+ * آیا صفحه‌ی جاری، آرشیو یک تگِ noindex است؟
+ */
+function ahangban_is_noindex_tag_archive() {
+    return is_tag() && ahangban_tag_is_noindex(get_queried_object());
 }
 
 // Rank Math
 add_filter('rank_math/frontend/robots', function ($robots) {
-    if (ahangban_is_thin_tag_archive()) {
+    if (ahangban_is_noindex_tag_archive()) {
         $robots['index']  = 'noindex';
         $robots['follow'] = 'follow';
     }
     return $robots;
 });
 
-// حذف تگ‌های کم‌پست از نقشه سایت Rank Math
+// حذف تگ‌ها از نقشه سایت Rank Math
 add_filter('rank_math/sitemap/entry', function ($url, $type, $object) {
-    if ($type === 'term' && $object instanceof WP_Term && $object->taxonomy === 'post_tag'
-        && (int) $object->count < AHANGBAN_TAG_MIN_POSTS) {
+    if ($type === 'term' && ahangban_tag_is_noindex($object)) {
         return false;
     }
     return $url;
@@ -60,7 +72,7 @@ add_filter('rank_math/sitemap/entry', function ($url, $type, $object) {
 
 // اگر Rank Math فعال نبود، متا روبوتس را خودمان چاپ می‌کنیم
 add_action('wp_head', function () {
-    if (!class_exists('RankMath') && ahangban_is_thin_tag_archive()) {
+    if (!class_exists('RankMath') && ahangban_is_noindex_tag_archive()) {
         echo '<meta name="robots" content="noindex, follow">' . "\n";
     }
 }, 1);
