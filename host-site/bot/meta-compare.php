@@ -207,13 +207,40 @@ foreach ((array) $groups as $group) :
 ?>
 <table>
     <tr><th colspan="5"><?php echo bmc_h($group['title']); ?> <span class="muted">(<?php echo bmc_h($group['key']); ?>)</span></th></tr>
-    <tr><th style="width:200px">نام فیلد (meta key)</th><th style="width:220px">کلید</th><th style="width:110px">نوع</th><th style="width:160px">مقدار پیش‌فرض</th><th>برچسب</th></tr>
-    <?php foreach ((array) $fields as $field) : ?>
+    <tr><th style="width:170px">نام فیلد (meta key)</th><th style="width:190px">کلید</th><th style="width:100px">نوع</th><th style="width:120px">مقدار پیش‌فرض</th><th style="width:260px">گزینه‌ها (مقدار = برچسب)</th><th style="width:130px">مقداری که ربات می‌نویسد</th><th>برچسب</th></tr>
+    <?php foreach ((array) $fields as $field) :
+        $choices = (!empty($field['choices']) && is_array($field['choices'])) ? $field['choices'] : [];
+        $choice_text = [];
+        foreach (array_slice($choices, 0, 8, true) as $cv => $cl) {
+            $choice_text[] = $cv . ' = ' . $cl;
+        }
+        if (count($choices) > 8) {
+            $choice_text[] = '…';
+        }
+        // همان منطق ربات: مقدار config → پیش‌فرض → گزینه‌ی اول فیلد انتخابی بدون گزینه‌ی خالی → ''
+        $bot_value = '(مقدار خودِ ربات)';
+        if (isset($bot_acf_values) && is_array($bot_acf_values) && array_key_exists($field['name'], $bot_acf_values)) {
+            $bot_value = bmc_val($bot_acf_values[$field['name']]) . ' (config)';
+        } elseif (!in_array($field['name'], ['music320', 'music128', 'online', 'video_low', 'video_medium', 'artist', 'song', 'artist_en', 'song_en', 'music_text', 'composer', 'arranger', 'lyricist', 'mixmaster', 'guitar', 'publisher', 'genre', 'mood'], true)) {
+            if (isset($field['default_value']) && $field['default_value'] !== '' && $field['default_value'] !== []) {
+                $bot_value = bmc_val($field['default_value']) . ' (پیش‌فرض)';
+            } elseif (in_array($field['type'], ['select', 'radio', 'button_group'], true) && empty($field['allow_null']) && empty($field['multiple']) && $choices) {
+                reset($choices);
+                $bot_value = key($choices) . ' (گزینه‌ی اول)';
+            } elseif (in_array($field['type'], ['repeater', 'group', 'flexible_content', 'clone', 'tab', 'accordion', 'message', 'taxonomy'], true)) {
+                $bot_value = '— دست نمی‌خورد —';
+            } else {
+                $bot_value = "'' (خالی)";
+            }
+        }
+    ?>
     <tr>
         <td class="ltr"><?php echo bmc_h($field['name']); ?></td>
         <td class="ltr"><?php echo bmc_h($field['key']); ?></td>
-        <td class="ltr"><?php echo bmc_h($field['type']); ?></td>
+        <td class="ltr"><?php echo bmc_h($field['type'] . (isset($field['allow_null']) && $field['allow_null'] ? ' (allow_null)' : '') . (!empty($field['multiple']) ? ' (multiple)' : '')); ?></td>
         <td class="ltr"><?php echo bmc_h(isset($field['default_value']) ? bmc_val($field['default_value']) : ''); ?></td>
+        <td class="ltr"><?php echo bmc_h(implode(' | ', $choice_text)); ?></td>
+        <td class="ltr"><?php echo bmc_h($bot_value); ?></td>
         <td><?php echo bmc_h($field['label']); ?></td>
     </tr>
     <?php endforeach; ?>
