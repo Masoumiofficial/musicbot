@@ -2,13 +2,13 @@
 /**
  * Plugin Name: AhangBan SEO
  * Description: noindex کردن صفحه‌های تگ (تگ در سایت استفاده نمی‌شود) + اسکیمای MusicRecording (JSON-LD) برای پست‌های آهنگ
- * Version:     1.1.0
+ * Version:     1.1.1
  * Author:      AhangBan
  *
  * محل قرارگیری:  wp-content/mu-plugins/ahangban-seo.php
  * (اگر پوشه mu-plugins وجود ندارد، آن را بسازید. افزونه‌های این پوشه همیشه فعال هستند و نیازی به فعال‌سازی ندارند.)
  *
- * 1) ربات دیگر به پست‌ها تگ نمی‌دهد (آرشیو خواننده = taxonomy «singer»، «دانلود آهنگ» = دسته‌بندی).
+ * 1) ربات دیگر به پست‌ها تگ نمی‌دهد (آرشیو خواننده = taxonomy هنرمند «artist» (قبلاً «singer»)، «دانلود آهنگ» = دسته‌بندی).
  *    تگ‌های قدیمی («دانلود آهنگ»، «آهنگ X» و ...) هنوز در سایت هستند؛ این افزونه همه‌ی صفحه‌های تگ را
  *    noindex می‌کند و از نقشه سایت Rank Math حذف می‌کند تا صفحه‌های تکراری/تک‌پستی در گوگل ایندکس نشوند.
  *    (اگر روزی خواستید دوباره از تگ استفاده کنید، AHANGBAN_NOINDEX_ALL_TAGS را false کنید؛ در آن حالت
@@ -133,9 +133,15 @@ function ahangban_build_music_schema($post_id) {
     $permalink = get_permalink($post_id);
     $image     = get_the_post_thumbnail_url($post_id, 'full');
 
-    // لینک آرشیو خواننده
-    $artist_url = '';
-    $singer_terms = get_the_terms($post_id, 'singer');
+    // لینک آرشیو خواننده (taxonomy هنرمند: «artist»؛ روی سایت‌های قدیمی «singer»)
+    $artist_url   = '';
+    $singer_terms = false;
+    foreach (['artist', 'singer'] as $artist_taxonomy) {
+        if (taxonomy_exists($artist_taxonomy)) {
+            $singer_terms = get_the_terms($post_id, $artist_taxonomy);
+            break;
+        }
+    }
     if (is_array($singer_terms) && !empty($singer_terms)) {
         $link = get_term_link($singer_terms[0]);
         if (!is_wp_error($link)) {

@@ -35,6 +35,19 @@ function bmc_val($v) {
     return mb_strlen($v) > 160 ? mb_substr($v, 0, 160) . ' …' : $v;
 }
 
+/**
+ * نام داخلی taxonomy هنرمند: $bot_artist_taxonomy از config.php اگر در سایت باشد، وگرنه artist / singer
+ */
+function bmc_artist_taxonomy() {
+    $configured = isset($GLOBALS['bot_artist_taxonomy']) ? sanitize_key((string) $GLOBALS['bot_artist_taxonomy']) : '';
+    foreach (array_unique(array_filter([$configured, 'artist', 'singer'])) as $taxonomy) {
+        if (taxonomy_exists($taxonomy)) {
+            return $taxonomy;
+        }
+    }
+    return '';
+}
+
 function bmc_post_info($post_id) {
     $post = get_post($post_id);
     if (!$post) {
@@ -46,7 +59,7 @@ function bmc_post_info($post_id) {
         'author'   => $author ? $author->user_login . ' (' . $author->display_name . ')' : '— کاربری با این آیدی وجود ندارد —',
         'thumb'    => (int) get_post_thumbnail_id($post_id),
         'cats'     => wp_get_post_categories($post_id),
-        'singer'   => taxonomy_exists('singer') ? wp_get_object_terms($post_id, 'singer', ['fields' => 'names']) : [],
+        'singer'   => bmc_artist_taxonomy() !== '' ? wp_get_object_terms($post_id, bmc_artist_taxonomy(), ['fields' => 'names']) : [],
         'meta'     => get_post_meta($post_id),
     ];
 }
@@ -155,7 +168,7 @@ $admins = get_users(['role' => 'administrator', 'orderby' => 'ID', 'order' => 'A
         'تاریخ'        => function ($i) { return $i['post']->post_date . ' (ویرایش: ' . $i['post']->post_modified . ')'; },
         'تصویر شاخص'   => function ($i) { return $i['thumb'] ? 'attachment ' . $i['thumb'] : '— ندارد —'; },
         'دسته‌ها'      => function ($i) { return implode(', ', $i['cats']); },
-        'خواننده'      => function ($i) { return is_array($i['singer']) ? implode(', ', $i['singer']) : ''; },
+        'هنرمند'       => function ($i) { return (is_array($i['singer']) ? implode(', ', $i['singer']) : '') . ' (taxonomy: ' . (bmc_artist_taxonomy() !== '' ? bmc_artist_taxonomy() : 'پیدا نشد') . ')'; },
         'تعداد متاها'  => function ($i) { return count($i['meta']); },
     ];
     foreach ($rows as $label => $fn) {

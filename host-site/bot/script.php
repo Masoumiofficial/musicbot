@@ -559,17 +559,44 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
 }
 
 /**
+ * نام داخلی taxonomy خواننده/هنرمند (آرشیو هنرمند در قالب)
+ * اول مقدار config.php ($bot_artist_taxonomy) اگر در سایت ثبت شده باشد؛
+ * وگرنه اولین مورد موجود از «artist» (نام فعلی در قالب) و «singer» (نام قدیمی).
+ * خروجی: نام taxonomy یا '' اگر هیچ‌کدام در سایت نبود
+ */
+function bm_artist_taxonomy($configured = '') {
+    $candidates = array_unique(array_filter([
+        sanitize_key((string) $configured),
+        'artist',
+        'singer',
+    ]));
+
+    foreach ($candidates as $taxonomy) {
+        if (taxonomy_exists($taxonomy)) {
+            return $taxonomy;
+        }
+    }
+
+    return '';
+}
+
+/**
  * ساخت (یا پیدا کردن) ترم خواننده
  * نام ترم = $artist (فارسی) | نامک ترم = $artist_en (انگلیسی)
  * مثال: نام «کسری زاهدی» و نامک «kasra-zahedi»
  * اگر ترم از قبل با نامک فارسی ساخته شده باشد، نامکش به انگلیسی اصلاح می‌شود
- * خروجی: ['id' => شناسه ترم, 'link' => لینک آرشیو خواننده]
+ * $taxonomy: نام داخلی taxonomy هنرمند (خالی = تشخیص خودکار با bm_artist_taxonomy)
+ * خروجی: ['id' => شناسه ترم, 'link' => لینک آرشیو خواننده, 'taxonomy' => نام taxonomy]
  */
-function bm_get_singer_term($artist, $artist_en) {
-    $result = ['id' => 0, 'link' => ''];
+function bm_get_singer_term($artist, $artist_en, $taxonomy = '') {
+    if ($taxonomy === '') {
+        $taxonomy = bm_artist_taxonomy();
+    }
+
+    $result = ['id' => 0, 'link' => '', 'taxonomy' => $taxonomy];
 
     $artist = bm_clean_text($artist);
-    if ($artist === '' || !taxonomy_exists('singer')) {
+    if ($artist === '' || $taxonomy === '' || !taxonomy_exists($taxonomy)) {
         return $result;
     }
 
@@ -582,7 +609,7 @@ function bm_get_singer_term($artist, $artist_en) {
 
     // پیدا کردن ترم با نام فارسی
     $term_id = 0;
-    $found   = term_exists($artist, 'singer');
+    $found   = term_exists($artist, $taxonomy);
     if ($found) {
         $term_id = is_array($found) ? (int) $found['term_id'] : (int) $found;
     }
@@ -590,7 +617,7 @@ function bm_get_singer_term($artist, $artist_en) {
     // اگر نبود، با نام فارسی و نامک انگلیسی بساز
     if (!$term_id) {
         $args = ($slug !== '') ? ['slug' => $slug] : [];
-        $new  = wp_insert_term($artist, 'singer', $args);
+        $new  = wp_insert_term($artist, $taxonomy, $args);
 
         if (is_wp_error($new)) {
             $existing_id = $new->get_error_data('term_exists');
@@ -598,7 +625,7 @@ function bm_get_singer_term($artist, $artist_en) {
                 $term_id = (int) $existing_id;
             } else {
                 // مثلاً نامک تکرارِ ترم دیگری بود؛ بدون نامک دستی می‌سازیم
-                $new = wp_insert_term($artist, 'singer');
+                $new = wp_insert_term($artist, $taxonomy);
                 if (is_wp_error($new)) {
                     return $result;
                 }
@@ -609,13 +636,13 @@ function bm_get_singer_term($artist, $artist_en) {
         }
     } elseif ($slug !== '') {
         // ترم قبلاً وجود داشته؛ اگر نامکش انگلیسی نیست اصلاح کن
-        $term_obj = get_term($term_id, 'singer');
+        $term_obj = get_term($term_id, $taxonomy);
         if ($term_obj && !is_wp_error($term_obj) && $term_obj->slug !== $slug) {
-            wp_update_term($term_id, 'singer', ['slug' => $slug]);
+            wp_update_term($term_id, $taxonomy, ['slug' => $slug]);
         }
     }
 
-    $link = get_term_link($term_id, 'singer');
+    $link = get_term_link($term_id, $taxonomy);
     if (!is_wp_error($link)) {
         $result['id']   = $term_id;
         $result['link'] = $link;
@@ -774,7 +801,9 @@ if (!empty($functions_dl_music) && $dl_userpwd === '') {
 /* -------------------------------------------------------
  |  6) ساخت محتوای پست
  * ------------------------------------------------------ */
-$singer_term = bm_get_singer_term($artist, $artist_en);
+// taxonomy هنرمند: از config.php ($bot_artist_taxonomy)، وگرنه تشخیص خودکار artist/singer
+$artist_taxonomy = bm_artist_taxonomy(isset($bot_artist_taxonomy) ? $bot_artist_taxonomy : '');
+$singer_term     = bm_get_singer_term($artist, $artist_en, $artist_taxonomy);
 
 $my_post_content = bm_build_post_content([
     'artist'      => $artist,
@@ -847,8 +876,8 @@ foreach ($meta_updates as $key => $value) {
 
 /* -------------------------------------------------------
  |  9) taxonomyها
- |  به پست‌ها تگ (post_tag) داده نمی‌شود: آرشیو خواننده را taxonomy «singer»،
- |  «دانلود آهنگ» را دسته‌بندی و سبک/حال‌وهوا را «genre» و «mood» پوشش می‌دهند.
+ |  به پست‌ها تگ (post_tag) داده نمی‌شود: آرشیو خواننده را taxonomy هنرمند («artist»؛ قبلاً «singer»،
+ |  قابل تنظیم با $bot_artist_taxonomy)، «دانلود آهنگ» را دسته‌بندی و سبک/حال‌وهوا را «genre» و «mood» پوشش می‌دهند.
  |  تگ فقط صفحه‌های آرشیو تکراری یا تک‌پستی می‌سازد که برای سئو ضرر دارد.
  * ------------------------------------------------------ */
 
@@ -876,10 +905,12 @@ if (taxonomy_exists('category') && !empty($post_categories)) {
 }
 
 // تاکسونومی‌های اختصاصی
-if (!empty($singer_term['id'])) {
-    wp_set_object_terms($post_id, [(int) $singer_term['id']], 'singer', false);
-} else {
-    bm_set_term_if_not_empty($post_id, $artist, 'singer', false);
+if ($artist_taxonomy !== '') {
+    if (!empty($singer_term['id'])) {
+        wp_set_object_terms($post_id, [(int) $singer_term['id']], $artist_taxonomy, false);
+    } else {
+        bm_set_term_if_not_empty($post_id, $artist, $artist_taxonomy, false);
+    }
 }
 bm_set_term_if_not_empty($post_id, $mood, 'mood', false);
 bm_set_term_if_not_empty($post_id, $style, 'genre', false);
@@ -1031,6 +1062,12 @@ if (is_array($acf_sync)) {
         . (!empty($acf_filled) ? ' (' . esc_html(implode(', ', $acf_filled)) . ')' : '') . '<br>';
 }
 echo 'دسته‌بندی‌ها: ' . esc_html(implode(', ', $post_categories)) . ' (' . ($bot_source === 'manual' ? 'ارسال دستی' : 'ارسال خودکار') . ')<br>';
+if ($artist_taxonomy === '') {
+    echo 'هنرمند: ثبت نشد — taxonomy هنرمند (artist/singer) در سایت پیدا نشد<br>';
+} else {
+    echo 'هنرمند: ' . esc_html($artist) . ' (taxonomy ' . esc_html($artist_taxonomy)
+        . (!empty($singer_term['id']) ? '، ترم ' . intval($singer_term['id']) : '') . ')<br>';
+}
 
 if (is_array($download_response)) {
     echo 'پوشه هاست دانلود: ' . esc_html($dl_dir) . '<br>';
