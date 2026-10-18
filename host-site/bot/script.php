@@ -121,6 +121,26 @@ function bm_download_dir($content_type, $artist_en) {
 }
 
 /**
+ * آیدی دسته‌های پست بر اساس مسیر ارسال
+ *   $source = 'auto'   → [$cat_music]
+ *   $source = 'manual' → [$cat_music, $cat_featured]
+ * خروجی آرایه‌ای از آیدی‌های عددی (دسته‌ی اول = دسته‌ی اصلی)؛ مقادیر 0 یا تکراری حذف می‌شوند
+ */
+function bm_post_categories($source, $cat_music, $cat_featured) {
+    $categories = [(int) $cat_music];
+
+    if ($source === 'manual') {
+        $categories[] = (int) $cat_featured;
+    }
+
+    $categories = array_filter($categories, function ($id) {
+        return $id > 0;
+    });
+
+    return array_values(array_unique($categories));
+}
+
+/**
  * درخواست POST JSON با cURL
  */
 function bm_curl_post_json($url, array $payload, $timeout = 30) {
@@ -646,13 +666,25 @@ foreach ($meta_updates as $key => $value) {
 /* -------------------------------------------------------
  |  9) taxonomyها
  |  به پست‌ها تگ (post_tag) داده نمی‌شود: آرشیو خواننده را taxonomy «singer»،
- |  «دانلود آهنگ» را دسته‌بندی «music» و سبک/حال‌وهوا را «genre» و «mood» پوشش می‌دهند.
+ |  «دانلود آهنگ» را دسته‌بندی و سبک/حال‌وهوا را «genre» و «mood» پوشش می‌دهند.
  |  تگ فقط صفحه‌های آرشیو تکراری یا تک‌پستی می‌سازد که برای سئو ضرر دارد.
  * ------------------------------------------------------ */
 
-// دسته‌بندی اصلی
-if (taxonomy_exists('category')) {
-    wp_set_object_terms($post_id, ['music'], 'category', false);
+// دسته‌بندی بر اساس مسیر ارسال ($bot_source را auto.php = 'auto' و manual.php = 'manual' ست می‌کنند)
+//   خودکار (فید)              → فقط $cat_music
+//   دستی (robo.php و آرشیو)   → $cat_music + $cat_featured
+//   اگر منبع مشخص نبود، محافظه‌کارانه فقط $cat_music داده می‌شود تا «آثار منتخب» اشتباهی پر نشود.
+$post_categories = bm_post_categories(
+    isset($bot_source) ? $bot_source : '',
+    isset($cat_music) ? $cat_music : 0,
+    isset($cat_featured) ? $cat_featured : 0
+);
+
+if (taxonomy_exists('category') && !empty($post_categories)) {
+    wp_set_object_terms($post_id, $post_categories, 'category', false);
+
+    // دسته‌ی اصلی Rank Math = دانلود آهنگ (برای لینک/بردکرامب وقتی پست دو دسته دارد)
+    update_post_meta($post_id, 'rank_math_primary_category', (int) $post_categories[0]);
 }
 
 // تاکسونومی‌های اختصاصی
@@ -778,6 +810,7 @@ echo '<strong>پست با موفقیت ساخته شد.</strong><br>';
 echo 'ID پست: ' . intval($post_id) . '<br>';
 echo 'عنوان: ' . esc_html($mytitle) . '<br>';
 echo 'تصویر شاخص: ' . esc_html($image_result['message']) . '<br>';
+echo 'دسته‌بندی‌ها: ' . esc_html(implode(', ', $post_categories)) . ' (' . ((isset($bot_source) && $bot_source === 'manual') ? 'ارسال دستی' : 'ارسال خودکار') . ')<br>';
 
 if (is_array($download_response)) {
     echo 'پوشه هاست دانلود: ' . esc_html($dl_dir) . '<br>';
