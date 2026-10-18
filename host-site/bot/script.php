@@ -5,6 +5,9 @@ if (!defined('ABSPATH')) {
 
 global $wpdb;
 
+// توابع احراز هویت (برای ارسال یوزر/رمز به هاست دانلود)؛ خودِ بررسی ورود در manual.php / auto.php انجام می‌شود
+require_once __DIR__ . '/auth.php';
+
 
 $apiUrl = 'https://api.wintheme.ir/b2m.php';
 
@@ -118,6 +121,65 @@ function bm_download_dir($content_type, $artist_en) {
 }
 
 /**
+ * جدا کردن چند نام از یک فیلد عوامل («علی و رضا»، «A & B»، «A، B»، «A / B»)
+ * خروجی: آرایه‌ای از نام‌های تمیزشده
+ */
+function bm_split_names($value) {
+    $value = bm_clean_text($value);
+    if ($value === '') {
+        return [];
+    }
+
+    $parts = preg_split('/\s*(?:[،,\/&|؛;]|\s+و\s+|\s+and\s+)\s*/iu', $value);
+    $names = [];
+
+    foreach ((array) $parts as $name) {
+        $name = trim(preg_replace('/\s+/u', ' ', (string) $name), " \t-–_:.");
+        if ($name === '') {
+            continue;
+        }
+        $names[] = $name;
+    }
+
+    return $names;
+}
+
+/**
+ * تگ‌های پست
+ *
+ * فقط موجودیت‌هایی تگ می‌شوند که بین پست‌های مختلف تکرار می‌شوند و واقعاً جستجو می‌شوند:
+ *   - نام خواننده
+ *   - عوامل آهنگ: آهنگساز، تنظیم‌کننده، ترانه‌سرا
+ * تگ‌های عمومی («دانلود آهنگ»، «دانلود آهنگ جدید») و تگ یکتای هر آهنگ («آهنگ X») حذف شده‌اند،
+ * چون فقط صفحه‌های آرشیو تکراری/تک‌پستی می‌سازند و ارزشی برای رتبه‌بندی ندارند.
+ */
+function bm_build_post_tags($artist, array $credits, $max = 6) {
+    $tags   = [];
+    $artist = bm_clean_text($artist);
+
+    // مقادیر بی‌معنی که گاهی از API برمی‌گردند
+    $junk = ['-', '—', 'ندارد', 'نامشخص', 'نا مشخص', 'مشخص نیست', 'خودش', 'unknown', 'none', 'n/a'];
+
+    if ($artist !== '') {
+        $tags[] = $artist;
+    }
+
+    foreach ($credits as $credit) {
+        foreach (bm_split_names($credit) as $name) {
+            // نام‌های خیلی کوتاه یا مقادیر بی‌معنی
+            if (mb_strlen($name, 'UTF-8') < 3 || in_array(mb_strtolower($name, 'UTF-8'), $junk, true)) {
+                continue;
+            }
+            $tags[] = $name;
+        }
+    }
+
+    $tags = array_values(array_unique($tags));
+
+    return array_slice($tags, 0, $max);
+}
+
+/**
  * درخواست POST JSON با cURL
  */
 function bm_curl_post_json($url, array $payload, $timeout = 30) {
@@ -160,8 +222,9 @@ function bm_curl_post_json($url, array $payload, $timeout = 30) {
 
 /**
  * درخواست POST فرم‌دیتا با cURL
+ * $userpwd = «user:pass» برای HTTP Basic Auth (خالی = بدون احراز هویت)
  */
-function bm_curl_post_form($url, array $payload, $timeout = 120) {
+function bm_curl_post_form($url, array $payload, $timeout = 120, $userpwd = '') {
     if (empty($url)) {
         return [
             'success' => false,
@@ -173,7 +236,7 @@ function bm_curl_post_form($url, array $payload, $timeout = 120) {
 
     $ch = curl_init($url);
 
-    curl_setopt_array($ch, [
+    $options = [
         CURLOPT_POST           => true,
         CURLOPT_POSTFIELDS     => $payload,
         CURLOPT_RETURNTRANSFER => true,
@@ -181,7 +244,14 @@ function bm_curl_post_form($url, array $payload, $timeout = 120) {
         CURLOPT_TIMEOUT        => $timeout,
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_SSL_VERIFYHOST => false,
-    ]);
+    ];
+
+    if ($userpwd !== '') {
+        $options[CURLOPT_HTTPAUTH] = CURLAUTH_BASIC;
+        $options[CURLOPT_USERPWD]  = $userpwd;
+    }
+
+    curl_setopt_array($ch, $options);
 
     $body  = curl_exec($ch);
     $error = curl_error($ch);
@@ -563,6 +633,15 @@ if ($post_exists) {
 }
 
 /* -------------------------------------------------------
+ |  5-1) یوزر/رمز اتصال به هاست دانلود (قبل از ساخت پست بررسی می‌شود تا پست بدون فایل ساخته نشود)
+ * ------------------------------------------------------ */
+$dl_userpwd = bm_auth_userpwd();
+
+if (!empty($functions_dl_music) && $dl_userpwd === '') {
+    exit('خطا: یوزر/رمز اتصال به هاست دانلود در دسترس نیست. در اجرای خط فرمان (کران‌جاب) باید BM_AUTH_PASS در wp-config.php تعریف شود.');
+}
+
+/* -------------------------------------------------------
  |  6) ساخت محتوای پست
  * ------------------------------------------------------ */
 $singer_term = bm_get_singer_term($artist, $artist_en);
@@ -601,14 +680,20 @@ if (is_wp_error($post_id) || !$post_id) {
  |  8) سئو (Yoast)
  * ------------------------------------------------------ */
 $wpseo_title     = $mytitle;
-$wpseo_metadesc  = "دانلود آهنگ {$artist} {$song} با لینک مستقیم و کیفیت 320 و 128";
-$wpseo_focuskw   = "دانلود آهنگ {$artist} {$song}";
+$wpseo_metadesc  = "دانلود آهنگ جدید {$artist} به نام {$song} با کیفیت 320 و 128، پخش آنلاین" . ($matnmusic !== '' ? ' و متن ترانه' : '');
+
+// کلمه کانونی اصلی = همان عبارتی که کاربر جستجو می‌کند؛ کلمات بعدی (با کاما) کلمات کانونی فرعی Rank Math هستند
+$focus_keywords = array_values(array_unique(array_filter([
+    "دانلود آهنگ {$artist} {$song}",
+    "{$artist} {$song}",
+    ($artist_en !== $artist || $song_en !== $song) ? "{$artist_en} {$song_en}" : '',
+])));
 
 
 $meta_updates = [
     'rank_math_title'           => wp_strip_all_tags($wpseo_title),
     'rank_math_description'     => wp_strip_all_tags($wpseo_metadesc),
-    'rank_math_focus_keyword'   => wp_strip_all_tags($artist),
+    'rank_math_focus_keyword'   => wp_strip_all_tags(implode(',', $focus_keywords)),
     'rank_math_seo_score'       => '99',
 ];
 
@@ -619,14 +704,13 @@ foreach ($meta_updates as $key => $value) {
 
 /* -------------------------------------------------------
  |  9) تگ‌ها و taxonomyها
+ |  تگ = نام خواننده + عوامل (آهنگساز، تنظیم، ترانه‌سرا). بدون تگ عمومی یا تگ یکتای هر آهنگ.
  * ------------------------------------------------------ */
-$post_tags = [
-    'دانلود آهنگ',
-    'دانلود آهنگ جدید',
-    "آهنگ {$song}",
-];
+$post_tags = bm_build_post_tags($artist, [$composer, $regulator, $songwriter]);
 
-wp_set_object_terms($post_id, array_filter(array_unique($post_tags)), 'post_tag');
+if (!empty($post_tags)) {
+    wp_set_object_terms($post_id, $post_tags, 'post_tag', false);
+}
 
 // دسته‌بندی اصلی
 if (taxonomy_exists('category')) {
@@ -718,7 +802,7 @@ if (!empty($functions_dl_music)) {
         'file_320'  => $mp3_file_320,
         'file_128'  => $mp3_file_128,
         'dir_file'  => $dl_dir, // مثال: music/m/mohsen-yeganeh
-    ], 300);
+    ], 300, $dl_userpwd);
 
     // برای بررسی لاگ
     update_post_meta($post_id, '_bm_download_response', maybe_serialize($download_response));
@@ -760,8 +844,18 @@ echo 'تصویر شاخص: ' . esc_html($image_result['message']) . '<br>';
 if (is_array($download_response)) {
     echo 'پوشه هاست دانلود: ' . esc_html($dl_dir) . '<br>';
     echo 'دانلود موزیک: ' . ($download_response['success'] ? 'انجام شد' : 'ناموفق') . '<br>';
-    if (!$download_response['success'] && !empty($download_response['error'])) {
-        echo 'خطای دانلود موزیک: ' . esc_html($download_response['error']) . '<br>';
+    if (!$download_response['success']) {
+        $dl_error = 'HTTP ' . intval($download_response['code']);
+        if (!empty($download_response['error'])) {
+            $dl_error .= ' | ' . $download_response['error'];
+        }
+        if (intval($download_response['code']) === 401) {
+            $dl_error .= ' | هاست دانلود یوزر/رمز را نپذیرفت (config.php هر دو هاست باید یکی باشد)';
+        }
+        if (!empty($download_response['body'])) {
+            $dl_error .= ' | ' . mb_substr(trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags((string) $download_response['body']))), 0, 250);
+        }
+        echo 'خطای دانلود موزیک: ' . esc_html($dl_error) . '<br>';
     }
 }
 
