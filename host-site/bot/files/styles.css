@@ -1,0 +1,102 @@
+@font-face{font-family:yekan;font-style:normal;font-weight:400;src:url(yekan.woff2) format("woff2");font-display:swap}
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: yekan;
+    height: 100vh;
+    display: flex;
+    justify-content: center; /* مرکزیت افقی */
+    align-items: center; /* مرکزیت عمودی */
+    overflow: hidden; /* جلوگیری از اسکرول */
+}
+
+.background {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: url('bg.jpeg') no-repeat center center fixed;
+    background-size: cover;
+    filter: blur(8px); /* اعمال تار کردن */
+}
+
+.form-container {
+	position: relative;
+	background-color: rgba(255, 255, 255, 0.9);
+	padding: 40px;
+	border-radius: 10px;
+	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+	width: 450px;
+	text-align: center;
+	backdrop-filter: blur(5px);
+}
+
+h2 {
+    margin-bottom: 20px;
+    color: #333;
+}
+
+label {
+    margin-bottom: 8px;
+    font-weight: bold;
+    display: block;
+    color: #555;
+}
+
+input[type="url"] {
+    padding: 12px;
+    margin-bottom: 15px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    width: 100%;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+
+input[type="url"]:focus {
+    border-color: #007bff; 
+    outline: none; 
+}
+
+button {
+	padding: 12px;
+	background-color: #007bff;
+	color: white;
+	border: none;
+	border-radius: 5px;
+	cursor: pointer;
+	transition: background-color 0.3s, transform 0.2s;
+	font-size: 16px;
+	width: 100%;
+	font-family: yekan;
+}
+
+button:hover {
+    background-color: #0056b3;
+    transform: translateY(-2px);
+}
+
+button:active {
+    transform: translateY(1px);
+}
+.alert-box {
+    background-color: #FFA500; /* رنگ نارنجی */
+    color: #fff; /* رنگ متن سفید */
+    padding: 20px;
+    margin: 20px 0;
+    border-radius: 5px;
+    border: 1px solid #e69500; /* حاشیه کمی تیره‌تر */
+    font-weight: bold;
+    text-align: center;
+}
+.alert-box a {
+	color: #333;
+}
+.alert-box a:hover {
+	color: #007bff;
+}
