@@ -166,6 +166,103 @@ function bm_detect_source() {
 }
 
 /**
+ * نویسنده‌ی معتبر برای پست
+ *   1) $bot_post_author در config.php (آیدی عددی، نام کاربری یا ایمیل)
+ *   2) کاربر وردپرسی هم‌نام با یوزر ورود ربات ($bot_auth_user)
+ *   3) اولین مدیر سایت (کوچک‌ترین آیدی)
+ * قبلاً آیدی 1 ثابت بود؛ روی سایتی که کاربر شماره‌ی 1 حذف یا عوض شده باشد پست «بدون نویسنده» ساخته می‌شد.
+ */
+function bm_resolve_post_author($configured = '', $auth_user = '') {
+    foreach ([$configured, $auth_user] as $candidate) {
+        $candidate = trim((string) $candidate);
+        if ($candidate === '') {
+            continue;
+        }
+
+        if (ctype_digit($candidate)) {
+            $user = get_user_by('id', (int) $candidate);
+        } else {
+            $user = get_user_by('login', $candidate);
+            if (!$user && strpos($candidate, '@') !== false) {
+                $user = get_user_by('email', $candidate);
+            }
+            if (!$user) {
+                $user = get_user_by('slug', $candidate);
+            }
+        }
+
+        if ($user && !empty($user->ID)) {
+            return (int) $user->ID;
+        }
+    }
+
+    $admins = get_users([
+        'role'    => 'administrator',
+        'orderby' => 'ID',
+        'order'   => 'ASC',
+        'number'  => 1,
+        'fields'  => 'ID',
+    ]);
+
+    if (!empty($admins)) {
+        return (int) $admins[0];
+    }
+
+    return 1;
+}
+
+/**
+ * همگام‌سازی فیلدهای ACF (اگر افزونه فعال باشد) — همان کاری که زدن «به‌روزرسانی» در پیشخوان می‌کند:
+ *   - برای فیلدهایی که ربات مقدارشان را ذخیره کرده، کلید مرجع ACF (_name = field_key) ثبت می‌شود تا
+ *     get_field() / get_fields() قالب، پست ربات را دقیقاً مثل پست ذخیره‌شده از پیشخوان ببیند
+ *   - فیلدهای ساده‌ای که ربات ست نکرده با مقدار پیش‌فرضشان ذخیره می‌شوند (مثل فرم ویرایش)
+ * فیلدهای ترکیبی (repeater/group/flexible/clone) و taxonomy دست نمی‌خورند.
+ * خروجی: ['referenced' => [...], 'filled' => [...]] یا null اگر ACF فعال نباشد.
+ */
+function bm_acf_sync_post_fields($post_id) {
+    if (!function_exists('acf_get_field_groups') || !function_exists('acf_get_fields') || !function_exists('update_field')) {
+        return null;
+    }
+
+    $skip_types = ['repeater', 'group', 'flexible_content', 'clone', 'tab', 'accordion', 'message', 'taxonomy'];
+    $summary    = ['referenced' => [], 'filled' => []];
+
+    $groups = acf_get_field_groups(['post_id' => $post_id, 'post_type' => 'post']);
+    if (empty($groups) || !is_array($groups)) {
+        return $summary;
+    }
+
+    foreach ($groups as $group) {
+        $fields = acf_get_fields($group);
+        if (empty($fields) || !is_array($fields)) {
+            continue;
+        }
+
+        foreach ($fields as $field) {
+            if (empty($field['name']) || empty($field['key']) || in_array($field['type'], $skip_types, true)) {
+                continue;
+            }
+
+            $name = $field['name'];
+
+            if (metadata_exists('post', $post_id, $name)) {
+                if (get_post_meta($post_id, '_' . $name, true) !== $field['key']) {
+                    update_post_meta($post_id, '_' . $name, $field['key']);
+                    $summary['referenced'][] = $name;
+                }
+                continue;
+            }
+
+            $default = isset($field['default_value']) ? $field['default_value'] : '';
+            update_field($field['key'], $default, $post_id);
+            $summary['filled'][] = $name;
+        }
+    }
+
+    return $summary;
+}
+
+/**
  * درخواست POST JSON با cURL
  */
 function bm_curl_post_json($url, array $payload, $timeout = 30) {
@@ -643,10 +740,23 @@ $my_post_content = bm_build_post_content([
 
 /* -------------------------------------------------------
  |  7) ساخت پست
+ |  پست اول به صورت پیش‌نویس ساخته می‌شود و بعد از آماده شدن متاها، دسته‌ها، تصویر شاخص و
+ |  فایل‌ها (بخش 14) منتشر می‌شود؛ مثل وقتی که پست در پیشخوان ذخیره می‌شود.
  * ------------------------------------------------------ */
+$post_author_id = bm_resolve_post_author(
+    isset($bot_post_author) ? $bot_post_author : '',
+    isset($bot_auth_user) ? $bot_auth_user : ''
+);
+
+// بقیه‌ی مراحل با همین کاربر اجرا می‌شود (مثل ذخیره از پیشخوان): هوک‌هایی که current_user_can را
+// بررسی می‌کنند اجرا می‌شوند و محتوا مثل کاربر مدیر بدون فیلتر kses ذخیره می‌شود
+if ($post_author_id > 0 && get_current_user_id() !== $post_author_id) {
+    wp_set_current_user($post_author_id);
+}
+
 $post_data = [
-    'post_author'   => 1,
-    'post_status'   => 'publish',
+    'post_author'   => $post_author_id,
+    'post_status'   => 'draft',
     'post_type'     => 'post',
     'post_title'    => $mytitle,
     'post_name'     => sanitize_title($post_name),
@@ -788,29 +898,13 @@ if (!empty($style))      update_post_meta($post_id, 'genre', $style);
 if (!empty($mood))       update_post_meta($post_id, 'mood', $mood);
 
 /* -------------------------------------------------------
- |  12) دانلود موزیک‌ها روی هاست دانلود
+ |  11-1) همگام‌سازی با ACF (فقط اگر افزونه فعال باشد)
+ |  بعد از متاها و دسته‌ها اجرا می‌شود تا گروه‌های فیلدی که بر اساس دسته نمایش داده می‌شوند هم پیدا شوند.
  * ------------------------------------------------------ */
-$download_response = null;
-
-if (!empty($functions_dl_music)) {
-    $download_response = bm_curl_post_form($functions_dl_music, [
-        'music320'  => $music320,
-        'music128'  => $music128,
-        'artist_en' => $artist_en,
-        'song_en'   => $song_en,
-        'image'     => $imageUrl,
-        'mp3_name'  => $mp3_name,
-        'file_320'  => $mp3_file_320,
-        'file_128'  => $mp3_file_128,
-        'dir_file'  => $dl_dir, // مثال: music/m/mohsen-yeganeh
-    ], 300, $dl_userpwd);
-
-    // برای بررسی لاگ
-    update_post_meta($post_id, '_bm_download_response', maybe_serialize($download_response));
-}
+$acf_sync = bm_acf_sync_post_fields($post_id);
 
 /* -------------------------------------------------------
- |  13) ثبت تصویر شاخص
+ |  12) ثبت تصویر شاخص
  * ------------------------------------------------------ */
 $image_result = [
     'success' => false,
@@ -834,13 +928,56 @@ if (!empty($imageUrl)) {
 update_post_meta($post_id, '_bm_featured_image_result', maybe_serialize($image_result));
 
 /* -------------------------------------------------------
- |  14) خروجی نهایی
+ |  13) دانلود موزیک‌ها روی هاست دانلود
+ * ------------------------------------------------------ */
+$download_response = null;
+
+if (!empty($functions_dl_music)) {
+    $download_response = bm_curl_post_form($functions_dl_music, [
+        'music320'  => $music320,
+        'music128'  => $music128,
+        'artist_en' => $artist_en,
+        'song_en'   => $song_en,
+        'image'     => $imageUrl,
+        'mp3_name'  => $mp3_name,
+        'file_320'  => $mp3_file_320,
+        'file_128'  => $mp3_file_128,
+        'dir_file'  => $dl_dir, // مثال: music/m/mohsen-yeganeh
+    ], 300, $dl_userpwd);
+
+    // برای بررسی لاگ
+    update_post_meta($post_id, '_bm_download_response', maybe_serialize($download_response));
+}
+
+/* -------------------------------------------------------
+ |  14) انتشار پست
+ |  تا این‌جا پست پیش‌نویس بود؛ حالا که همه چیز آماده است منتشر می‌شود. این همان اتفاقی است که با
+ |  زدن «به‌روزرسانی» در پیشخوان می‌افتد: هوک‌های save_post / publish_post قالب و افزونه‌ها
+ |  (کش، پلیر صفحه‌ی اصلی، ارسال تلگرام، نقشه‌ی سایت و ...) پست را کامل می‌بینند.
+ * ------------------------------------------------------ */
+$publish_result = wp_update_post([
+    'ID'          => $post_id,
+    'post_status' => 'publish',
+], true);
+
+$post_published = !is_wp_error($publish_result) && (int) $publish_result > 0;
+$publish_error  = is_wp_error($publish_result) ? $publish_result->get_error_message() : '';
+
+/* -------------------------------------------------------
+ |  15) خروجی نهایی
  * ------------------------------------------------------ */
 echo '<div style="direction:rtl;text-align:right;background:#fff;border:1px solid #ddd;padding:15px;margin:15px 0;font-family:tahoma;font-size:13px;line-height:2">';
 echo '<strong>پست با موفقیت ساخته شد.</strong><br>';
 echo 'ID پست: ' . intval($post_id) . '<br>';
 echo 'عنوان: ' . esc_html($mytitle) . '<br>';
 echo 'تصویر شاخص: ' . esc_html($image_result['message']) . '<br>';
+$author_user = get_userdata($post_author_id);
+echo 'نویسنده: ' . esc_html($author_user ? $author_user->display_name . ' (' . $author_user->user_login . ' — ID ' . $post_author_id . ')' : 'ID ' . $post_author_id) . '<br>';
+echo 'وضعیت انتشار: ' . ($post_published ? 'منتشر شد' : 'پیش‌نویس ماند — ' . esc_html($publish_error)) . '<br>';
+if (is_array($acf_sync)) {
+    echo 'ACF: ' . count($acf_sync['referenced']) . ' فیلد مرجع‌گذاری شد، ' . count($acf_sync['filled']) . ' فیلد با مقدار پیش‌فرض ذخیره شد'
+        . (!empty($acf_sync['filled']) ? ' (' . esc_html(implode(', ', $acf_sync['filled'])) . ')' : '') . '<br>';
+}
 echo 'دسته‌بندی‌ها: ' . esc_html(implode(', ', $post_categories)) . ' (' . ($bot_source === 'manual' ? 'ارسال دستی' : 'ارسال خودکار') . ')<br>';
 
 if (is_array($download_response)) {
