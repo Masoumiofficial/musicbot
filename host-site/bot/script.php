@@ -401,8 +401,9 @@ function bm_set_term_if_not_empty($post_id, $value, $taxonomy, $append = false) 
 /**
  * آپلود تصویر از URL و ثبت به عنوان تصویر شاخص
  * از media_sideload_image استفاده می‌کنیم چون پایدارتر از file_get_contents است
+ * $max_size: کاور به مربعی با ضلع حداکثر این عدد برش می‌خورد (برش مرکزی)؛ تصویر کوچک‌تر بزرگ نمی‌شود. 0 = بدون تغییر اندازه
  */
-function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '', $title = '', $alt = '', $desc = '', $arrContextOptions = []) {
+function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '', $title = '', $alt = '', $desc = '', $arrContextOptions = [], $max_size = 1080) {
     if (empty($image_url) || !filter_var($image_url, FILTER_VALIDATE_URL)) {
         return [
             'success' => false,
@@ -471,15 +472,25 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
         $file_ext = 'jpg';
     }
 
-    // تغییر اندازه تصویر شاخص به 500x500 (برش مرکزی برای حفظ تناسب)
-    $editor = wp_get_image_editor($tmp);
-    if (!is_wp_error($editor)) {
-        $resized = $editor->resize(500, 500, true);
-        if (!is_wp_error($resized)) {
-            $saved = $editor->save($tmp . '.' . $file_ext);
-            if (!is_wp_error($saved) && !empty($saved['path']) && file_exists($saved['path'])) {
-                @unlink($tmp);
-                $tmp = $saved['path'];
+    // کاور: مربع با ضلع حداکثر $max_size (برش مرکزی). تصویر کوچک‌تر بزرگ نمی‌شود و
+    // تصویری که از قبل مربع و در حد مجاز است دست نمی‌خورد (بدون فشرده‌سازی دوباره)
+    $max_size = (int) $max_size;
+    if ($max_size > 0) {
+        $editor = wp_get_image_editor($tmp);
+        if (!is_wp_error($editor)) {
+            $size   = $editor->get_size();
+            $width  = isset($size['width']) ? (int) $size['width'] : 0;
+            $height = isset($size['height']) ? (int) $size['height'] : 0;
+            $side   = min($width, $height, $max_size);
+            if ($side > 0 && ($width !== $side || $height !== $side)) {
+                $resized = $editor->resize($side, $side, true);
+                if (!is_wp_error($resized)) {
+                    $saved = $editor->save($tmp . '.' . $file_ext);
+                    if (!is_wp_error($saved) && !empty($saved['path']) && file_exists($saved['path'])) {
+                        @unlink($tmp);
+                        $tmp = $saved['path'];
+                    }
+                }
             }
         }
     }
@@ -534,9 +545,15 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
         ];
     }
 
+    // اندازه‌ی نهایی برای گزارش
+    $meta = wp_get_attachment_metadata($attachment_id);
+    $dims = (!empty($meta['width']) && !empty($meta['height']))
+        ? ' (' . (int) $meta['width'] . '×' . (int) $meta['height'] . ')'
+        : '';
+
     return [
         'success' => true,
-        'message' => 'تصویر شاخص با موفقیت ثبت شد.',
+        'message' => 'تصویر شاخص با موفقیت ثبت شد' . $dims . '.',
         'id'      => $attachment_id,
     ];
 }
@@ -950,7 +967,8 @@ if (!empty($imageUrl)) {
         $mytitle,
         $alt,
         $description,
-        $arrContextOptions
+        $arrContextOptions,
+        isset($bot_cover_size) ? (int) $bot_cover_size : 1080
     );
 }
 
