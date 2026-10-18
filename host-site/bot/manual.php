@@ -12,6 +12,7 @@ if (!empty($_POST['link'])) {
 
 
     if (filter_var($postUrl, FILTER_VALIDATE_URL)) {
+        $bot_source = 'manual'; // ارسال دستی (robo.php و آرشیو هنرمندان) → دانلود آهنگ + آثار منتخب
         include('script.php');
 
         $permalink = rawurlencode(get_permalink($post_id));

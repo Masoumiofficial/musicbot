@@ -36,6 +36,7 @@ foreach ($rssXml->channel->item as $item) {
     if (empty($existingLinks)) {
         $wpdb->insert('wp_subcheck', array('url' => $postUrl), array('%s'));
 		
+        $bot_source = 'auto'; // ارسال خودکار از فید → فقط دسته‌ی دانلود آهنگ
         include("script.php");
 		
         echo ("<p><a href='" . $postUrl . "'>" . $postTitle . "</a></p>");
