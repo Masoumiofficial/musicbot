@@ -9,7 +9,13 @@
  * نام فایل‌ها:
  *   Artist - Song [320].mp3
  *   Artist - Song [128].mp3
+ *
+ * دسترسی فقط با یوزر/رمز تعریف‌شده در config.php (HTTP Basic Auth)
  */
+
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/auth.php';
+bm_require_auth('AhangBan Download Host');
 
 $musicUrl320 = $_POST['music320'] ?? '';
 $musicUrl128 = $_POST['music128'] ?? '';

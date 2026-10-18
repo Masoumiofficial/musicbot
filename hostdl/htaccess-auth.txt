@@ -1,0 +1,24 @@
+# اگر بعد از آپلود config.php و auth.php، اسکریپت سایت خطای «HTTP 401» می‌دهد و
+# پیام می‌گوید «هیچ اطلاعات ورودی دریافت نشد»، هاست دانلود شما PHP را به صورت
+# CGI/FastCGI اجرا می‌کند و هدر Authorization را به PHP نمی‌دهد.
+# این خط‌ها را به فایل .htaccess ریشه‌ی هاست دانلود اضافه کنید (فایل موجود را پاک نکنید):
+
+<IfModule mod_setenvif.c>
+    SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+</IfModule>
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+</IfModule>
+
+# جلوگیری از دسترسی مستقیم به فایل‌های تنظیمات
+<FilesMatch "^(config|auth)\.php$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

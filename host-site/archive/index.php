@@ -1,3 +1,16 @@
+<?php
+// ورود با یوزر/رمز پنل ربات (config.php و auth.php در پوشه bot کنار پوشه archive)
+$bm_bot_dir = is_file(dirname(__DIR__) . '/bot/auth.php')
+    ? dirname(__DIR__) . '/bot'
+    : rtrim((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''), '/\\') . '/bot';
+if (!is_file($bm_bot_dir . '/auth.php')) {
+    http_response_code(500);
+    exit('auth.php not found: the archive folder must be deployed next to the bot folder.');
+}
+require_once $bm_bot_dir . '/config.php';
+require_once $bm_bot_dir . '/auth.php';
+bm_require_auth();
+?>
 <!doctype html>
 <html lang="fa" dir="rtl">
 <head>
