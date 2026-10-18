@@ -1,6 +1,6 @@
 <?php
 /**
- * ارسال خودکار از فید — در هر اجرا یک آهنگ جدید ثبت می‌شود
+ * ارسال خودکار از فید — در هر اجرا یک آهنگ جدید ثبت می‌شود (نسخه ۳)
  *
  * دسترسی (دو حالت):
  *   الف) رمز ربات روی خود سرور تعریف شده باشد — یک خط در wp-config.php بالای «That's all, stop editing»:
@@ -77,6 +77,28 @@ function bm_auto_prepare_table($wpdb, $table) {
 }
 
 /**
+ * وقتی BM_AUTH_PASS دیده نمی‌شود، روی صفحه‌ی 401 توضیح می‌دهد چرا (بدون نمایش مسیر یا رمز)
+ */
+function bm_auto_config_note() {
+    $prefix = 'auto.php نسخه ۳: BM_AUTH_PASS تعریف نشده، به همین دلیل یوزر/رمز لازم است — ';
+
+    if (!defined('ABSPATH')) {
+        return $prefix . 'وردپرس بارگذاری نشد (wp-load.php کنار پوشه‌ی bot پیدا نشد).';
+    }
+
+    $config = file_exists(ABSPATH . 'wp-config.php') ? ABSPATH . 'wp-config.php' : dirname(ABSPATH) . '/wp-config.php';
+    $text   = is_readable($config) ? (string) @file_get_contents($config) : '';
+
+    if ($text === '') {
+        return $prefix . 'wp-config.php قابل خواندن نبود.';
+    }
+    if (strpos($text, 'BM_AUTH_PASS') === false) {
+        return $prefix . 'در wp-config.php که وردپرس استفاده می‌کند، خطی با BM_AUTH_PASS وجود ندارد (احتمالاً فایل دیگری ویرایش شده).';
+    }
+    return $prefix . 'خط BM_AUTH_PASS در wp-config.php هست ولی اجرا نمی‌شود (داخل کامنت است یا define اشتباه نوشته شده؛ آن را درست زیر define های DB_ بگذارید).';
+}
+
+/**
  * پایان اجرا با یک پیام (در حالت خلاصه فقط همین پیام نشان داده می‌شود)
  */
 function bm_auto_stop($message) {
@@ -134,6 +156,12 @@ list($bm_req_user) = bm_auth_request_credentials();
 $bm_quiet = false;
 
 if ($bm_req_user !== null || isset($_GET['report']) || !$bm_server_pass) {
+    if ($bm_req_user === null && !$bm_server_pass && PHP_SAPI !== 'cli') {
+        // زیر صفحه‌ی 401 دلیل لازم بودن یوزر/رمز را هم نشان بده (برای عیب‌یابی)
+        register_shutdown_function(function () {
+            echo '<p dir="rtl" style="font-family:tahoma,sans-serif;text-align:center;color:#555">' . bm_auto_config_note() . '</p>';
+        });
+    }
     bm_require_auth();
 } elseif (PHP_SAPI !== 'cli') {
     $bm_quiet = true;
