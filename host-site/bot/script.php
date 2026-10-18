@@ -121,65 +121,6 @@ function bm_download_dir($content_type, $artist_en) {
 }
 
 /**
- * جدا کردن چند نام از یک فیلد عوامل («علی و رضا»، «A & B»، «A، B»، «A / B»)
- * خروجی: آرایه‌ای از نام‌های تمیزشده
- */
-function bm_split_names($value) {
-    $value = bm_clean_text($value);
-    if ($value === '') {
-        return [];
-    }
-
-    $parts = preg_split('/\s*(?:[،,\/&|؛;]|\s+و\s+|\s+and\s+)\s*/iu', $value);
-    $names = [];
-
-    foreach ((array) $parts as $name) {
-        $name = trim(preg_replace('/\s+/u', ' ', (string) $name), " \t-–_:.");
-        if ($name === '') {
-            continue;
-        }
-        $names[] = $name;
-    }
-
-    return $names;
-}
-
-/**
- * تگ‌های پست
- *
- * فقط موجودیت‌هایی تگ می‌شوند که بین پست‌های مختلف تکرار می‌شوند و واقعاً جستجو می‌شوند:
- *   - نام خواننده
- *   - عوامل آهنگ: آهنگساز، تنظیم‌کننده، ترانه‌سرا
- * تگ‌های عمومی («دانلود آهنگ»، «دانلود آهنگ جدید») و تگ یکتای هر آهنگ («آهنگ X») حذف شده‌اند،
- * چون فقط صفحه‌های آرشیو تکراری/تک‌پستی می‌سازند و ارزشی برای رتبه‌بندی ندارند.
- */
-function bm_build_post_tags($artist, array $credits, $max = 6) {
-    $tags   = [];
-    $artist = bm_clean_text($artist);
-
-    // مقادیر بی‌معنی که گاهی از API برمی‌گردند
-    $junk = ['-', '—', 'ندارد', 'نامشخص', 'نا مشخص', 'مشخص نیست', 'خودش', 'unknown', 'none', 'n/a'];
-
-    if ($artist !== '') {
-        $tags[] = $artist;
-    }
-
-    foreach ($credits as $credit) {
-        foreach (bm_split_names($credit) as $name) {
-            // نام‌های خیلی کوتاه یا مقادیر بی‌معنی
-            if (mb_strlen($name, 'UTF-8') < 3 || in_array(mb_strtolower($name, 'UTF-8'), $junk, true)) {
-                continue;
-            }
-            $tags[] = $name;
-        }
-    }
-
-    $tags = array_values(array_unique($tags));
-
-    return array_slice($tags, 0, $max);
-}
-
-/**
  * درخواست POST JSON با cURL
  */
 function bm_curl_post_json($url, array $payload, $timeout = 30) {
@@ -703,14 +644,11 @@ foreach ($meta_updates as $key => $value) {
 
 
 /* -------------------------------------------------------
- |  9) تگ‌ها و taxonomyها
- |  تگ = نام خواننده + عوامل (آهنگساز، تنظیم، ترانه‌سرا). بدون تگ عمومی یا تگ یکتای هر آهنگ.
+ |  9) taxonomyها
+ |  به پست‌ها تگ (post_tag) داده نمی‌شود: آرشیو خواننده را taxonomy «singer»،
+ |  «دانلود آهنگ» را دسته‌بندی «music» و سبک/حال‌وهوا را «genre» و «mood» پوشش می‌دهند.
+ |  تگ فقط صفحه‌های آرشیو تکراری یا تک‌پستی می‌سازد که برای سئو ضرر دارد.
  * ------------------------------------------------------ */
-$post_tags = bm_build_post_tags($artist, [$composer, $regulator, $songwriter]);
-
-if (!empty($post_tags)) {
-    wp_set_object_terms($post_id, $post_tags, 'post_tag', false);
-}
 
 // دسته‌بندی اصلی
 if (taxonomy_exists('category')) {
