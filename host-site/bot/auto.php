@@ -2,11 +2,17 @@
 /**
  * ارسال خودکار از فید — در هر اجرا یک آهنگ جدید ثبت می‌شود
  *
- * این فایل مثل بقیه‌ی فایل‌های ربات پشت یوزر/رمز است؛ کران‌جاب هم باید آن را بفرستد:
- *   هر ۱۰ دقیقه:  0,10,20,30,40,50 * * * *  curl -s -u 'sajad:رمز' https://ahangban.ir/bot/auto.php >/dev/null 2>&1
- *   یا از خط فرمان:  BM_AUTH_PASS='رمز' php /home/USER/public_html/bot/auto.php >/dev/null 2>&1
- *   (یا define('BM_AUTH_PASS', 'رمز'); در wp-config.php و بعد php auto.php)
- * بدون یوزر/رمز پاسخ 401 است و هیچ چیزی ثبت نمی‌شود.
+ * دسترسی (دو حالت):
+ *   الف) رمز ربات روی خود سرور تعریف شده باشد — یک خط در wp-config.php بالای «That's all, stop editing»:
+ *            define('BM_AUTH_PASS', 'رمز ربات');
+ *        در این حالت کران می‌تواند این فایل را بدون یوزر/رمز صدا بزند:
+ *            wget -q -O /dev/null https://ahangban.ir/bot/auto.php
+ *            یا   php /home/USER/public_html/bot/auto.php
+ *        به درخواست‌های بدون یوزر/رمز فقط یک خط خلاصه نشان داده می‌شود؛ برای دیدن گزارش کامل
+ *        auto.php?report=1 را در مرورگر باز کنید و با یوزر/رمز ربات وارد شوید.
+ *   ب) اگر BM_AUTH_PASS تعریف نشده باشد، مثل بقیه‌ی فایل‌های ربات یوزر/رمز لازم است:
+ *            wget -q -O /dev/null --user='sajad' --password='رمز' https://ahangban.ir/bot/auto.php
+ *   هر ۵ دقیقه یک بار کافی است (0,5,10,15,... * * * *). اجراهای هم‌زمان قفل می‌شوند.
  *
  * آیتم‌های بررسی‌شده‌ی فید در جدول wp_subcheck نگه داشته می‌شوند (اگر نباشد ساخته می‌شود).
  * اگر ثبت آیتمی با خطا تمام شود (مثلاً API در دسترس نباشد) وضعیتش failed می‌شود و فقط وقتی
@@ -15,19 +21,14 @@
  */
 include("config.php");
 require_once __DIR__ . '/auth.php';
-bm_require_auth();
-
-include(dirname(__DIR__) . '/wp-load.php'); // مستقل از پوشه‌ی جاری (برای اجرای خط فرمان/کران)
+include(dirname(__DIR__) . '/wp-load.php'); // قبل از بررسی دسترسی، تا BM_AUTH_PASS داخل wp-config.php دیده شود
 set_time_limit(0);
-
-if (PHP_SAPI !== 'cli') {
-    header('Content-Type: text/html; charset=utf-8');
-}
 
 $rssFeedUrl     = "https://www.mybia2music.com/feed";
 $subcheck_table = 'wp_subcheck'; // جدول آیتم‌های بررسی‌شده‌ی فید
 $max_feed_items = 30;            // چند آیتم اول فید بررسی شود
 $max_attempts   = 3;             // آیتم خطادار حداکثر چند بار (در اجراهای بعدی) دوباره امتحان شود
+$lock_minutes   = 15;            // اگر اجرای قبلی هنوز تمام نشده، تا این مدت اجرای جدید شروع نمی‌شود
 
 $arrContextOptions = [
     'ssl'  => [
@@ -76,54 +77,111 @@ function bm_auto_prepare_table($wpdb, $table) {
 }
 
 /**
- * بعد از پایان اجرا (حتی اگر script.php با exit یا خطا تمام شده باشد) وضعیت آیتم ثبت می‌شود
+ * پایان اجرا با یک پیام (در حالت خلاصه فقط همین پیام نشان داده می‌شود)
+ */
+function bm_auto_stop($message) {
+    $GLOBALS['bm_auto_summary'] = $message;
+    exit($message);
+}
+
+/**
+ * بعد از پایان اجرا (حتی اگر script.php با exit یا خطا تمام شده باشد):
+ * آزاد کردن قفل، ثبت وضعیت آیتم و چاپ خلاصه
  */
 function bm_auto_finish() {
     global $wpdb;
 
-    $job = isset($GLOBALS['bm_auto_job']) ? $GLOBALS['bm_auto_job'] : null;
-    if (empty($job['url'])) {
-        return;
+    if (!empty($GLOBALS['bm_auto_locked'])) {
+        delete_transient('bm_auto_lock');
     }
 
-    if (!empty($job['done'])) {
-        $wpdb->update($job['table'], ['status' => 'done', 'post_id' => (int) $job['post_id']], ['url' => $job['url']]);
-        return;
+    $job  = isset($GLOBALS['bm_auto_job']) ? $GLOBALS['bm_auto_job'] : null;
+    $line = isset($GLOBALS['bm_auto_summary']) ? (string) $GLOBALS['bm_auto_summary'] : '';
+
+    if (!empty($job['url'])) {
+        if (!empty($job['done'])) {
+            $wpdb->update($job['table'], ['status' => 'done', 'post_id' => (int) $job['post_id']], ['url' => $job['url']]);
+            $line = 'ثبت شد: ' . $job['title'] . ' (پست ' . (int) $job['post_id'] . ')';
+        } else {
+            $wpdb->update($job['table'], ['status' => 'failed'], ['url' => $job['url']]);
+            $attempts = (int) $job['attempts'];
+            $line = 'ثبت نشد: ' . $job['title'] . ' — '
+                . ($attempts < $job['max_attempts']
+                    ? 'وقتی آیتم جدیدی در فید نباشد دوباره امتحان می‌شود (تلاش ' . $attempts . ' از ' . $job['max_attempts'] . ').'
+                    : 'بعد از ' . $job['max_attempts'] . ' تلاش کنار گذاشته شد.');
+        }
     }
 
-    $wpdb->update($job['table'], ['status' => 'failed'], ['url' => $job['url']]);
-
-    $attempts = (int) $job['attempts'];
-    echo '<p>ثبت نشد: ' . $job['title'] . ' — '
-        . ($attempts < $job['max_attempts']
-            ? 'وقتی آیتم جدیدی در فید نباشد دوباره امتحان می‌شود (تلاش ' . $attempts . ' از ' . $job['max_attempts'] . ').'
-            : 'بعد از ' . $job['max_attempts'] . ' تلاش کنار گذاشته شد.')
-        . '</p>';
+    if (!empty($GLOBALS['bm_auto_quiet'])) {
+        // درخواست بدون یوزر/رمز (کران): گزارش کامل نشان داده نمی‌شود، فقط یک خط خلاصه
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        echo ($line !== '' ? $line : 'خطا در اجرا — برای دیدن جزئیات auto.php?report=1 را با یوزر/رمز ربات باز کنید.');
+    } elseif (!empty($job['url'])) {
+        echo '<p>' . $line . '</p>';
+    }
 }
 
 /* -------------------------------------------------------
- |  1) پیش‌شرط‌ها — قبل از دست زدن به فید، تا آیتمی بی‌دلیل مصرف نشود
+ |  1) دسترسی
+ |  - یوزر/رمز فرستاده شده یا ?report=1 → باید درست باشد (گزارش کامل)
+ |  - بدون یوزر/رمز ولی BM_AUTH_PASS روی سرور تعریف شده → اجرا مجاز است، فقط خلاصه چاپ می‌شود (کران)
+ |  - در غیر این صورت → 401
+ * ------------------------------------------------------ */
+$bm_server_pass = (defined('BM_AUTH_PASS') && (string) BM_AUTH_PASS !== '') || (string) getenv('BM_AUTH_PASS') !== '';
+list($bm_req_user) = bm_auth_request_credentials();
+$bm_quiet = false;
+
+if ($bm_req_user !== null || isset($_GET['report']) || !$bm_server_pass) {
+    bm_require_auth();
+} elseif (PHP_SAPI !== 'cli') {
+    $bm_quiet = true;
+}
+
+if (PHP_SAPI !== 'cli') {
+    header('Content-Type: text/html; charset=utf-8');
+}
+
+$GLOBALS['bm_auto_quiet']   = $bm_quiet;
+$GLOBALS['bm_auto_summary'] = '';
+$GLOBALS['bm_auto_job']     = null;
+$GLOBALS['bm_auto_locked']  = false;
+register_shutdown_function('bm_auto_finish');
+
+if ($bm_quiet) {
+    ob_start();
+}
+
+/* -------------------------------------------------------
+ |  2) پیش‌شرط‌ها — قبل از دست زدن به فید، تا آیتمی بی‌دلیل مصرف نشود
  * ------------------------------------------------------ */
 if (bm_auth_userpwd() === '') {
-    die('خطا: یوزر/رمز اتصال به هاست دانلود در دسترس نیست؛ هیچ آیتمی از فید پردازش نشد. '
-        . 'کران را با یوزر/رمز ربات صدا بزنید (curl -u) یا در اجرای خط فرمان BM_AUTH_PASS را تعریف کنید.');
+    bm_auto_stop('خطا: یوزر/رمز اتصال به هاست دانلود در دسترس نیست؛ هیچ آیتمی از فید پردازش نشد. '
+        . 'یا BM_AUTH_PASS را در wp-config.php تعریف کنید یا کران را با یوزر/رمز ربات صدا بزنید.');
 }
+
+if (get_transient('bm_auto_lock')) {
+    bm_auto_stop('اجرای قبلی هنوز تمام نشده است؛ این اجرا رد شد.');
+}
+set_transient('bm_auto_lock', time(), $lock_minutes * 60);
+$GLOBALS['bm_auto_locked'] = true;
 
 global $wpdb;
 bm_auto_prepare_table($wpdb, $subcheck_table);
 
 /* -------------------------------------------------------
- |  2) فید
+ |  3) فید
  * ------------------------------------------------------ */
 $rssContent = @file_get_contents($rssFeedUrl, false, stream_context_create($arrContextOptions));
 
 if ($rssContent === FALSE) {
-    die("خطا در بارگذاری فید");
+    bm_auto_stop("خطا در بارگذاری فید");
 }
 
 $rssXml = @simplexml_load_string($rssContent);
 if ($rssXml === FALSE) {
-    die("خطا در تجزیه فید XML");
+    bm_auto_stop("خطا در تجزیه فید XML");
 }
 
 $items = [];
@@ -139,11 +197,11 @@ foreach ($rssXml->channel->item as $item) {
 }
 
 if (empty($items)) {
-    die('فید خالی بود.');
+    bm_auto_stop('فید خالی بود.');
 }
 
 /* -------------------------------------------------------
- |  3) انتخاب آیتم: اول آیتم‌های کاملاً جدید؛ اگر نبود، آیتم خطادار با تلاش باقی‌مانده
+ |  4) انتخاب آیتم: اول آیتم‌های کاملاً جدید؛ اگر نبود، آیتم خطادار با تلاش باقی‌مانده
  * ------------------------------------------------------ */
 $placeholders = implode(',', array_fill(0, count($items), '%s'));
 $rows = $wpdb->get_results($wpdb->prepare(
@@ -177,8 +235,7 @@ if ($candidate === null) {
 }
 
 if ($candidate === null) {
-    echo 'آیتم جدیدی در فید نبود (' . count($items) . ' آیتم بررسی شد).';
-    exit;
+    bm_auto_stop('آیتم جدیدی در فید نبود (' . count($items) . ' آیتم بررسی شد).');
 }
 
 if ($retry) {
@@ -203,12 +260,11 @@ $GLOBALS['bm_auto_job'] = [
     'done'         => false,
     'post_id'      => 0,
 ];
-register_shutdown_function('bm_auto_finish');
 
 echo '<p>در حال ثبت: <a href="' . esc_url($candidate) . '">' . $items[$candidate] . '</a>' . ($retry ? ' (تلاش دوباره)' : '') . '</p>';
 
 /* -------------------------------------------------------
- |  4) ثبت پست — یک آیتم در هر اجرا
+ |  5) ثبت پست — یک آیتم در هر اجرا
  * ------------------------------------------------------ */
 $postUrl    = $candidate;
 $bot_source = 'auto'; // ارسال خودکار از فید → فقط دسته‌ی دانلود آهنگ
