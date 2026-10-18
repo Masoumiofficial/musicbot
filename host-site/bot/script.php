@@ -141,6 +141,31 @@ function bm_post_categories($source, $cat_music, $cat_featured) {
 }
 
 /**
+ * تشخیص مسیر ارسال وقتی فایل ورودی $bot_source را ست نکرده باشد
+ * (از روی نام اسکریپت ورودی: auto.php → 'auto'، manual.php → 'manual'، غیر از این‌ها → '')
+ * manual.php هم فرم robo.php و هم ارسال‌های /archive را دریافت می‌کند.
+ */
+function bm_detect_source() {
+    $entry = '';
+
+    foreach (['SCRIPT_FILENAME', 'SCRIPT_NAME', 'PHP_SELF'] as $key) {
+        if (!empty($_SERVER[$key])) {
+            $entry = strtolower(basename((string) $_SERVER[$key]));
+            break;
+        }
+    }
+
+    if ($entry === 'auto.php') {
+        return 'auto';
+    }
+    if ($entry === 'manual.php') {
+        return 'manual';
+    }
+
+    return '';
+}
+
+/**
  * درخواست POST JSON با cURL
  */
 function bm_curl_post_json($url, array $payload, $timeout = 30) {
@@ -674,10 +699,16 @@ foreach ($meta_updates as $key => $value) {
 //   خودکار (فید)              → فقط $cat_music
 //   دستی (robo.php و آرشیو)   → $cat_music + $cat_featured
 //   اگر منبع مشخص نبود، محافظه‌کارانه فقط $cat_music داده می‌شود تا «آثار منتخب» اشتباهی پر نشود.
+if (!isset($bot_source)) {
+    // فایل ورودی قدیمی است و $bot_source را ست نکرده → از نام اسکریپت ورودی تشخیص بده
+    $bot_source = bm_detect_source();
+}
+
+// آیدی دسته‌ها از config.php خوانده می‌شود؛ اگر آن‌جا تعریف نشده بود: 3 = دانلود آهنگ، 249 = آثار منتخب
 $post_categories = bm_post_categories(
-    isset($bot_source) ? $bot_source : '',
-    isset($cat_music) ? $cat_music : 0,
-    isset($cat_featured) ? $cat_featured : 0
+    $bot_source,
+    isset($cat_music) ? $cat_music : 3,
+    isset($cat_featured) ? $cat_featured : 249
 );
 
 if (taxonomy_exists('category') && !empty($post_categories)) {
@@ -810,7 +841,7 @@ echo '<strong>پست با موفقیت ساخته شد.</strong><br>';
 echo 'ID پست: ' . intval($post_id) . '<br>';
 echo 'عنوان: ' . esc_html($mytitle) . '<br>';
 echo 'تصویر شاخص: ' . esc_html($image_result['message']) . '<br>';
-echo 'دسته‌بندی‌ها: ' . esc_html(implode(', ', $post_categories)) . ' (' . ((isset($bot_source) && $bot_source === 'manual') ? 'ارسال دستی' : 'ارسال خودکار') . ')<br>';
+echo 'دسته‌بندی‌ها: ' . esc_html(implode(', ', $post_categories)) . ' (' . ($bot_source === 'manual' ? 'ارسال دستی' : 'ارسال خودکار') . ')<br>';
 
 if (is_array($download_response)) {
     echo 'پوشه هاست دانلود: ' . esc_html($dl_dir) . '<br>';
