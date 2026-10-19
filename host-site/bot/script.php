@@ -8,6 +8,32 @@ global $wpdb;
 // توابع احراز هویت (برای ارسال یوزر/رمز به هاست دانلود)؛ خودِ بررسی ورود در manual.php / auto.php انجام می‌شود
 require_once __DIR__ . '/auth.php';
 
+$dir_wp = date('Y/m');
+
+$arrContextOptions = array(
+    "ssl" => array(
+        "verify_peer"      => false,
+        "verify_peer_name" => false,
+    ),
+);
+
+if (!function_exists('Download')) {
+    function Download($url, $saveto, $arrContextOptions) {
+        $content = file_get_contents($url, false, stream_context_create($arrContextOptions));
+        file_put_contents($saveto, $content);
+    }
+}
+
+/* -------------------------------------------------------
+ |  حالت «فقط توابع»
+ |  پست‌ساز (postsaz/engine.php) این فایل را با $bm_functions_only = true بارگذاری می‌کند تا از
+ |  توابع bm_* (نام فایل‌ها، ترم هنرمند، کاور، ACF، اتصال به هاست دانلود و ...) استفاده کند؛
+ |  در این حالت جریان ربات (دریافت از API و ساخت پست) اجرا نمی‌شود.
+ |  توابع این فایل در زمان بارگذاری تعریف می‌شوند، پس return زودهنگام مشکلی برایشان ندارد.
+ * ------------------------------------------------------ */
+if (!empty($bm_functions_only)) {
+    return;
+}
 
 $apiUrl = 'https://api.wintheme.ir/b2m.php';
 
@@ -26,22 +52,6 @@ if (empty($urlsite)) {
  */
 if (empty($content_type)) {
     $content_type = 'music';
-}
-
-$dir_wp = date('Y/m');
-
-$arrContextOptions = array(
-    "ssl" => array(
-        "verify_peer"      => false,
-        "verify_peer_name" => false,
-    ),
-);
-
-if (!function_exists('Download')) {
-    function Download($url, $saveto, $arrContextOptions) {
-        $content = file_get_contents($url, false, stream_context_create($arrContextOptions));
-        file_put_contents($saveto, $content);
-    }
 }
 
 function bm_clean_text($value) {

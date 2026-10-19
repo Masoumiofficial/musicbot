@@ -1,0 +1,605 @@
+/* پست‌ساز آهنگ‌بان — استایل پنل */
+
+:root {
+    --ps-bg: #f3f4f7;
+    --ps-card: #ffffff;
+    --ps-text: #1f2430;
+    --ps-muted: #6b7280;
+    --ps-line: #dfe3ea;
+    --ps-accent: #b3000c;
+    --ps-accent-dark: #8c0009;
+    --ps-ok: #157347;
+    --ps-ok-bg: #e7f6ee;
+    --ps-warn: #9a6700;
+    --ps-warn-bg: #fff6d6;
+    --ps-err: #b42318;
+    --ps-err-bg: #fdecea;
+    --ps-radius: 10px;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: Vazirmatn, "IRANSans", "Segoe UI", Tahoma, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--ps-text);
+    background: var(--ps-bg);
+    direction: rtl;
+}
+
+a {
+    color: var(--ps-accent);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+.ps-wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 16px;
+}
+
+/* ---------- هدر ---------- */
+.ps-header {
+    background: #1f2430;
+    color: #fff;
+    margin-bottom: 20px;
+}
+
+.ps-header .ps-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 56px;
+    gap: 16px;
+}
+
+.ps-brand {
+    color: #fff;
+    font-weight: 700;
+    font-size: 17px;
+}
+
+.ps-brand span {
+    color: #ff6b74;
+}
+
+.ps-nav {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.ps-nav a {
+    color: #d7dbe3;
+    padding: 6px 10px;
+    border-radius: 6px;
+}
+
+.ps-nav a:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    text-decoration: none;
+}
+
+/* ---------- تب‌ها ---------- */
+.ps-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.ps-tab {
+    padding: 9px 18px;
+    border-radius: 999px;
+    background: #fff;
+    border: 1px solid var(--ps-line);
+    color: var(--ps-text);
+    font-weight: 600;
+}
+
+.ps-tab:hover {
+    text-decoration: none;
+    border-color: var(--ps-accent);
+}
+
+.ps-tab.is-active {
+    background: var(--ps-accent);
+    border-color: var(--ps-accent);
+    color: #fff;
+}
+
+.ps-panel {
+    display: none;
+}
+
+.ps-panel.is-active {
+    display: block;
+}
+
+/* ---------- کارت فرم ---------- */
+.ps-form,
+.ps-result,
+.ps-recent {
+    background: var(--ps-card);
+    border: 1px solid var(--ps-line);
+    border-radius: var(--ps-radius);
+    padding: 18px 20px;
+    margin-bottom: 20px;
+}
+
+.ps-note {
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    color: #3730a3;
+    border-radius: var(--ps-radius);
+    padding: 10px 14px;
+    margin: 0 0 14px;
+}
+
+.ps-alert {
+    background: var(--ps-err-bg);
+    border: 1px solid #f5c2c0;
+    color: var(--ps-err);
+    border-radius: var(--ps-radius);
+    padding: 10px 14px;
+    margin: 0 0 14px;
+}
+
+.ps-alert p {
+    margin: 4px 0;
+}
+
+.ps-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 18px;
+    margin-bottom: 10px;
+}
+
+.ps-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.ps-field-wide {
+    grid-column: 1 / -1;
+}
+
+.ps-label {
+    font-weight: 600;
+    color: #374151;
+}
+
+.ps-label b {
+    color: var(--ps-accent);
+}
+
+.ps-label small {
+    font-weight: 400;
+    color: var(--ps-muted);
+}
+
+.ps-hint {
+    color: var(--ps-muted);
+    font-size: 12px;
+}
+
+input[type="text"],
+input[type="url"],
+input[type="number"],
+select,
+textarea {
+    width: 100%;
+    font: inherit;
+    padding: 8px 10px;
+    border: 1px solid var(--ps-line);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--ps-text);
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: var(--ps-accent);
+    box-shadow: 0 0 0 3px rgba(179, 0, 12, 0.12);
+}
+
+textarea {
+    resize: vertical;
+    min-height: 120px;
+}
+
+/* ---------- فایل: لینک یا آپلود ---------- */
+.ps-media-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ps-media-url {
+    flex: 1 1 320px;
+}
+
+.ps-file-btn {
+    position: relative;
+    display: inline-block;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px dashed #9ca3af;
+    background: #f9fafb;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.ps-file-btn:hover {
+    border-color: var(--ps-accent);
+}
+
+.ps-file-btn input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    width: 100%;
+    cursor: pointer;
+}
+
+.ps-file-name {
+    color: var(--ps-ok);
+    font-size: 12px;
+    direction: ltr;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ps-media.has-file .ps-media-url {
+    opacity: 0.55;
+}
+
+/* ---------- بخش بازشونده ---------- */
+.ps-more {
+    border: 1px solid var(--ps-line);
+    border-radius: 8px;
+    padding: 8px 14px;
+    margin: 6px 0 14px;
+    background: #fafafa;
+}
+
+.ps-more summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #374151;
+}
+
+.ps-more .ps-grid {
+    margin-top: 12px;
+}
+
+/* ---------- دسته‌ها ---------- */
+.ps-cats {
+    border: 1px solid var(--ps-line);
+    border-radius: 8px;
+    padding: 8px 14px 12px;
+    margin: 0 0 12px;
+}
+
+.ps-cats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 4px 12px;
+    margin-top: 6px;
+}
+
+.ps-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    margin: 4px 0;
+}
+
+.ps-check small {
+    color: var(--ps-muted);
+}
+
+/* ---------- قطعه‌های آلبوم ---------- */
+.ps-tracks {
+    border: 1px solid var(--ps-line);
+    border-radius: 8px;
+    padding: 8px 14px 12px;
+    margin: 0 0 12px;
+}
+
+.ps-tracks-head,
+.ps-track {
+    display: grid;
+    grid-template-columns: 32px 1.2fr 1.2fr 2fr 2fr 32px;
+    gap: 6px;
+    align-items: center;
+}
+
+.ps-tracks-head {
+    color: var(--ps-muted);
+    font-size: 12px;
+    margin: 6px 0 4px;
+}
+
+.ps-track {
+    margin-bottom: 6px;
+}
+
+.ps-track-no {
+    text-align: center;
+    color: var(--ps-muted);
+}
+
+.ps-track-remove {
+    border: none;
+    background: transparent;
+    color: #9ca3af;
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.ps-track-remove:hover {
+    color: var(--ps-err);
+}
+
+.ps-tracks-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+/* ---------- دکمه‌ها ---------- */
+.ps-btn {
+    display: inline-block;
+    font: inherit;
+    font-weight: 600;
+    padding: 9px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--ps-accent);
+    background: var(--ps-accent);
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.ps-btn:hover {
+    background: var(--ps-accent-dark);
+    text-decoration: none;
+    color: #fff;
+}
+
+.ps-btn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+.ps-btn-light {
+    background: #fff;
+    color: var(--ps-accent);
+}
+
+.ps-btn-light:hover {
+    background: #fff5f5;
+    color: var(--ps-accent-dark);
+}
+
+.ps-actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.ps-progress {
+    color: var(--ps-warn);
+}
+
+/* ---------- نتیجه ---------- */
+.ps-working {
+    background: var(--ps-warn-bg);
+    border: 1px solid #f3d88a;
+    color: var(--ps-warn);
+    border-radius: var(--ps-radius);
+    padding: 12px 16px;
+    margin-bottom: 14px;
+}
+
+.ps-result h1 {
+    font-size: 20px;
+    margin: 0 0 12px;
+}
+
+.ps-result h1.is-ok {
+    color: var(--ps-ok);
+}
+
+.ps-result h1.is-error {
+    color: var(--ps-err);
+}
+
+.ps-result h2 {
+    font-size: 16px;
+    margin: 18px 0 8px;
+}
+
+.ps-result-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.ps-report {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+.ps-report th,
+.ps-report td {
+    text-align: right;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--ps-line);
+    vertical-align: top;
+    word-break: break-word;
+}
+
+.ps-report th {
+    width: 170px;
+    white-space: nowrap;
+    color: #374151;
+    font-weight: 600;
+}
+
+.ps-report tr.is-ok th::before,
+.ps-report tr.is-warn th::before,
+.ps-report tr.is-error th::before {
+    content: "●";
+    margin-left: 6px;
+    font-size: 10px;
+}
+
+.ps-report tr.is-ok th::before {
+    color: var(--ps-ok);
+}
+
+.ps-report tr.is-warn th::before {
+    color: var(--ps-warn);
+}
+
+.ps-report tr.is-warn td {
+    background: var(--ps-warn-bg);
+}
+
+.ps-report tr.is-error th::before {
+    color: var(--ps-err);
+}
+
+.ps-report tr.is-error td {
+    background: var(--ps-err-bg);
+    color: var(--ps-err);
+}
+
+.ps-links {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.ps-links li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.ps-link-label {
+    min-width: 90px;
+    font-weight: 600;
+}
+
+.ps-links input {
+    flex: 1 1 320px;
+    font-size: 12px;
+    background: #f9fafb;
+}
+
+/* ---------- آخرین پست‌ها ---------- */
+.ps-recent h2 {
+    font-size: 16px;
+    margin: 0 0 10px;
+}
+
+.ps-recent table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.ps-recent th,
+.ps-recent td {
+    text-align: right;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--ps-line);
+}
+
+.ps-recent th {
+    color: var(--ps-muted);
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.ps-recent td a {
+    margin-left: 8px;
+}
+
+.ps-footer {
+    text-align: center;
+    color: var(--ps-muted);
+    font-size: 12px;
+    padding: 10px 16px 30px;
+}
+
+/* ---------- موبایل ---------- */
+@media (max-width: 760px) {
+    .ps-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ps-tracks-head {
+        display: none;
+    }
+
+    .ps-track {
+        grid-template-columns: 1fr 1fr;
+        border: 1px solid var(--ps-line);
+        border-radius: 8px;
+        padding: 8px;
+    }
+
+    .ps-track-no {
+        grid-column: 1 / 2;
+        text-align: right;
+    }
+
+    .ps-track-remove {
+        grid-column: 2 / 3;
+        justify-self: start;
+    }
+
+    .ps-track input {
+        grid-column: 1 / -1;
+    }
+
+    .ps-report th {
+        width: auto;
+        white-space: normal;
+    }
+}

@@ -13,7 +13,7 @@
 </IfModule>
 
 # جلوگیری از دسترسی مستقیم به فایل‌های تنظیمات
-<FilesMatch "^(config|auth)\.php$">
+<FilesMatch "^(config|auth|common)\.php$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>
