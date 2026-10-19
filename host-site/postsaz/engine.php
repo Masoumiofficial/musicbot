@@ -685,6 +685,20 @@ function ps_apply_metas($post_id, array $metas) {
     }
 }
 
+/** متاهای ثابت این نوع از config (metas) — مثل ty_content_type = video */
+function ps_type_metas(array $type) {
+    $metas = [];
+    if (!empty($type['metas']) && is_array($type['metas'])) {
+        foreach ($type['metas'] as $key => $value) {
+            $key = sanitize_key((string) $key);
+            if ($key !== '' && is_scalar($value)) {
+                $metas[$key] = (string) $value;
+            }
+        }
+    }
+    return $metas;
+}
+
 /**
  * پیدا کردن فیلد انتخابی «نوع اثر» در ACF: فیلدی که گزینه‌هایش دست‌کم با دو نوع مختلف
  * (آهنگ/ویدیو/آلبوم/...) جور دربیاید. خروجی: ['name' => نام فیلد, 'map' => [نوع => کلید گزینه]] یا null
@@ -737,28 +751,159 @@ function ps_detect_acf_type_field($post_id) {
     return null;
 }
 
+/** فیلد ACF با این نام در گروه‌های پست (null اگر ACF نباشد یا فیلد پیدا نشود) */
+function ps_acf_find_field($post_id, $name) {
+    static $cache = [];
+    $cache_key = $post_id . '|' . $name;
+    if (array_key_exists($cache_key, $cache)) {
+        return $cache[$cache_key];
+    }
+    $cache[$cache_key] = null;
+
+    if ($name === '' || !function_exists('acf_get_field_groups') || !function_exists('acf_get_fields')) {
+        return null;
+    }
+    $groups = acf_get_field_groups(['post_id' => $post_id, 'post_type' => 'post']);
+    foreach ((array) $groups as $group) {
+        foreach ((array) acf_get_fields($group) as $field) {
+            if (!empty($field['name']) && $field['name'] === $name && !empty($field['key'])) {
+                $cache[$cache_key] = $field;
+                return $field;
+            }
+        }
+    }
+    return null;
+}
+
+/** گزینه‌ای از $choices که کلید یا برچسبش با یکی از کلمه‌ها بخواند؛ null اگر نباشد */
+function ps_acf_match_choice(array $choices, array $words) {
+    foreach ($words as $word) {
+        $word_lc = mb_strtolower(trim((string) $word), 'UTF-8');
+        if ($word_lc === '') {
+            continue;
+        }
+        foreach ($choices as $choice_key => $choice_label) {
+            if (mb_strtolower((string) $choice_key, 'UTF-8') === $word_lc
+                || mb_strpos(mb_strtolower((string) $choice_label, 'UTF-8'), $word_lc) !== false) {
+                return (string) $choice_key;
+            }
+        }
+    }
+    return null;
+}
+
 /**
- * مقدار فیلدهای ACF برای این نوع: مقدار ثابت config (acf) و اگر خالی بود، گزینه‌ی تشخیص‌داده‌شده‌ی «نوع اثر»
- * روی مقادیر $bot_acf_values (config ربات) سوار می‌شود. خروجی: [overrides, توضیح برای گزارش]
+ * مقدار فیلدهای ACF برای این نوع، سوار بر $bot_acf_values (config ربات):
+ *   - فیلد «نوع اثر» (acf_type_field، مثل musics_type) = acf_type نوع؛ اگر acf_match داشته باشد و بین
+ *     گزینه‌های فیلد گزینه‌ی بهتری باشد همان انتخاب می‌شود
+ *   - اگر acf_type_field خالی باشد، فیلد نوع اثر خودکار پیدا می‌شود (ps_detect_acf_type_field)
+ *   - acf: مقدارهای ثابت دیگر
+ * خروجی: [overrides, توضیح برای گزارش]
  */
 function ps_acf_overrides(array $type, $post_id) {
     $overrides = isset($GLOBALS['bot_acf_values']) && is_array($GLOBALS['bot_acf_values']) ? $GLOBALS['bot_acf_values'] : [];
-    $note      = '';
-
     if (!empty($type['acf']) && is_array($type['acf'])) {
         $overrides = array_merge($overrides, $type['acf']);
-        $note      = 'نوع اثر از config';
+    }
+
+    $notes      = [];
+    $field_name = (string) ps_cfg('acf_type_field', '');
+    $value      = isset($type['acf_type']) ? (string) $type['acf_type'] : '';
+    $words      = isset($type['acf_match']) ? array_filter(array_map('strval', (array) $type['acf_match'])) : [];
+
+    if ($field_name !== '') {
+        $field   = ps_acf_find_field($post_id, $field_name);
+        $choices = ($field && !empty($field['choices']) && is_array($field['choices'])) ? $field['choices'] : [];
+
+        if (!empty($words) && !empty($choices)) {
+            $match = ps_acf_match_choice($choices, $words);
+            if ($match !== null && $match !== $value) {
+                $notes[] = 'گزینه‌ی مخصوص «' . $type['label'] . '» (' . $match . ') انتخاب شد';
+                $value   = $match;
+            }
+        }
+        if ($value !== '') {
+            $overrides[$field_name] = $value;
+            array_unshift($notes, 'نوع اثر: ' . $field_name . ' = ' . $value);
+            if (!$field) {
+                $notes[] = 'فیلد ' . $field_name . ' در ACF پیدا نشد؛ به‌صورت متا ذخیره می‌شود';
+            } elseif (!empty($choices) && !array_key_exists($value, $choices)) {
+                $notes[] = 'توجه: ' . $value . ' بین گزینه‌های فیلد نیست (' . implode(', ', array_keys($choices)) . ')';
+            }
+        }
     } else {
         $detected = ps_detect_acf_type_field($post_id);
         if ($detected && isset($detected['map'][$type['key']])) {
             $overrides[$detected['name']] = $detected['map'][$type['key']];
-            $note = 'نوع اثر: ' . $detected['name'] . ' = ' . $detected['map'][$type['key']];
+            $notes[] = 'نوع اثر: ' . $detected['name'] . ' = ' . $detected['map'][$type['key']];
         } elseif ($detected) {
-            $note = 'گزینه‌ای برای «' . $type['label'] . '» در فیلد ' . $detected['name'] . ' پیدا نشد (گزینه‌ها: ' . implode(', ', array_unique($detected['map'])) . ')';
+            $notes[] = 'گزینه‌ای برای «' . $type['label'] . '» در فیلد ' . $detected['name'] . ' پیدا نشد (گزینه‌ها: ' . implode(', ', array_unique($detected['map'])) . ')';
+        } elseif ($value !== '') {
+            $notes[] = 'فیلد «نوع اثر» پیدا نشد (acf_type_field خالی است)';
         }
     }
 
-    return [$overrides, $note];
+    return [$overrides, implode(' — ', $notes)];
+}
+
+/**
+ * ذخیره‌ی فیلد تکرارشونده‌ی ACF (مثل قطعه‌های آلبوم)
+ * $rows = [['song_names' => ..., 'albumlink320' => ..., 'albumlink128' => ...], ...]
+ * اول متاهای خام نوشته می‌شوند ({name} = تعداد، {name}_{i}_{sub} = مقدار) تا بدون ACF هم کار کند،
+ * بعد اگر فیلد در ACF باشد update_field با کلید فیلد صدا زده می‌شود تا مرجع‌های _{name}_{i}_{sub} هم ثبت شوند.
+ * خروجی: ['ok' => bool, 'text' => توضیح]
+ */
+function ps_acf_update_repeater($post_id, $name, array $rows) {
+    $rows = array_values($rows);
+    if ($name === '') {
+        return ['ok' => false, 'text' => 'نام فیلد تکرارشونده تنظیم نشده'];
+    }
+
+    update_post_meta($post_id, $name, count($rows));
+    foreach ($rows as $i => $row) {
+        foreach ((array) $row as $sub => $value) {
+            update_post_meta($post_id, "{$name}_{$i}_{$sub}", $value);
+        }
+    }
+
+    $field = ps_acf_find_field($post_id, $name);
+    if (!$field || !function_exists('update_field')) {
+        return ['ok' => false, 'text' => 'فیلد ACF «' . $name . '» پیدا نشد؛ متاهای قطعه‌ها مستقیم ذخیره شدند'];
+    }
+
+    $sub_names = [];
+    foreach ((array) (isset($field['sub_fields']) ? $field['sub_fields'] : []) as $sub) {
+        if (!empty($sub['name'])) {
+            $sub_names[] = (string) $sub['name'];
+        }
+    }
+    $missing = !empty($rows) ? array_diff(array_keys((array) $rows[0]), $sub_names) : [];
+
+    update_field($field['key'], $rows, $post_id);
+
+    $text = 'فیلد تکرارشونده‌ی ' . $name . ' (' . $field['key'] . ') با ' . count($rows) . ' سطر ذخیره شد';
+    if (!empty($missing)) {
+        $text .= ' — زیرفیلد پیدا نشد: ' . implode(', ', $missing) . ' (نام‌ها را در config بررسی کنید)';
+    }
+    return ['ok' => empty($missing), 'text' => $text];
+}
+
+/**
+ * همگام‌سازی ACF مثل ربات (مرجع‌گذاری متاها + پیش‌فرض‌های فرم ویرایش + مقدارهای این نوع)
+ * اگر ACF فعال نباشد، مقدارهای نوع به‌صورت متای ساده ذخیره می‌شوند. خروجی: متن گزارش
+ */
+function ps_acf_sync($post_id, array $type) {
+    list($overrides, $note) = ps_acf_overrides($type, $post_id);
+    $result = bm_acf_sync_post_fields($post_id, $overrides);
+    if (!is_array($result)) {
+        ps_apply_metas($post_id, $overrides);
+        $pairs = [];
+        foreach ($overrides as $key => $value) {
+            $pairs[] = $key . '=' . (is_scalar($value) ? (string) $value : wp_json_encode($value, JSON_UNESCAPED_UNICODE));
+        }
+        return 'ACF فعال نیست؛ مقدارها به‌صورت متا ذخیره شدند' . (!empty($pairs) ? ' (' . implode(', ', $pairs) . ')' : '');
+    }
+    return ps_acf_report_text($result, $note);
 }
 
 function ps_acf_report_text($acf_sync, $note) {
@@ -1010,10 +1155,9 @@ function ps_run_single() {
         'mood'          => $mood,
         '_postsaz_type' => $type['key'],
         '_postsaz_time' => current_time('mysql'),
-    ] + $crew);
+    ] + $crew + ps_type_metas($type));
 
-    list($acf_overrides, $acf_note) = ps_acf_overrides($type, $post_id);
-    ps_row($report, 'ACF', ps_acf_report_text(bm_acf_sync_post_fields($post_id, $acf_overrides), $acf_note));
+    ps_row($report, 'ACF', ps_acf_sync($post_id, $type));
 
     $image = ps_featured_image($post_id, $cover['url'], $names['img_name'], $names['title'], $names['alt']);
     ps_row($report, 'تصویر شاخص', $image['message'], $image['success'] ? 'ok' : ($cover['url'] === '' ? 'warn' : 'error'));
@@ -1172,10 +1316,9 @@ function ps_run_video() {
         'music_text'    => $lyrics,
         '_postsaz_type' => $type['key'],
         '_postsaz_time' => current_time('mysql'),
-    ] + $crew);
+    ] + $crew + ps_type_metas($type));
 
-    list($acf_overrides, $acf_note) = ps_acf_overrides($type, $post_id);
-    ps_row($report, 'ACF', ps_acf_report_text(bm_acf_sync_post_fields($post_id, $acf_overrides), $acf_note));
+    ps_row($report, 'ACF', ps_acf_sync($post_id, $type));
 
     $image = ps_featured_image($post_id, $cover['url'], $names['img_name'], $names['title'], $names['alt']);
     ps_row($report, 'تصویر شاخص', $image['message'], $image['success'] ? 'ok' : ($cover['url'] === '' ? 'warn' : 'error'));
@@ -1349,9 +1492,13 @@ function ps_run_album() {
     $has128    = false;
 
     $meta_map  = (array) ps_cfg('album.meta', []);
+    $repeater  = (array) ps_cfg('album.repeater', []);
+    $sub_name  = !empty($repeater['name']) ? (string) $repeater['name'] : 'song_names';
+    $sub_320   = !empty($repeater['link320']) ? (string) $repeater['link320'] : 'albumlink320';
+    $sub_128   = !empty($repeater['link128']) ? (string) $repeater['link128'] : 'albumlink128';
     $metas     = [];
+    $rows      = [];
     $dl_tracks = [];
-    $online    = '';
 
     foreach ($tracks as $track) {
         $track_base = sprintf('%02d. ', $track['no']) . bm_dl_file_name("{$artist_en} - {$track['name']}");
@@ -1361,20 +1508,13 @@ function ps_run_album() {
         $url128     = $track['url128'] !== '' ? $base_url . $folder128 . '/' . $file128 : '';
         $has320     = $has320 || $url320 !== '';
         $has128     = $has128 || $url128 !== '';
-        if ($online === '') {
-            $online = $url128 !== '' ? $url128 : $url320;
-        }
 
-        if (!empty($meta_map['track_name'])) {
-            $metas[sprintf($meta_map['track_name'], $track['no'])] = $track['name_fa'];
-        }
-        // اگر قطعه فقط یک کیفیت دارد، هر دو متا به همان فایل اشاره می‌کنند (مثل تک‌آهنگ)
-        if (!empty($meta_map['mp3320'])) {
-            $metas[sprintf($meta_map['mp3320'], $track['no'])] = esc_url_raw($url320 !== '' ? $url320 : $url128);
-        }
-        if (!empty($meta_map['mp3128'])) {
-            $metas[sprintf($meta_map['mp3128'], $track['no'])] = esc_url_raw($url128 !== '' ? $url128 : $url320);
-        }
+        // یک سطر از فیلد تکرارشونده‌ی قالب؛ اگر قطعه فقط یک کیفیت دارد هر دو لینک به همان فایل اشاره می‌کنند
+        $rows[] = [
+            $sub_name => $track['name_fa'],
+            $sub_320  => esc_url_raw($url320 !== '' ? $url320 : $url128),
+            $sub_128  => esc_url_raw($url128 !== '' ? $url128 : $url320),
+        ];
         if (!empty($track['no_en'])) {
             ps_row($report, "قطعه {$track['no']}", "نام انگلیسی نداشت؛ نام فایل «{$track['name']}» شد", 'warn');
         }
@@ -1390,9 +1530,6 @@ function ps_run_album() {
     }
 
     if ($has320) {
-        if (!empty($meta_map['folder320'])) {
-            $metas[$meta_map['folder320']] = esc_url_raw($base_url . $folder320);
-        }
         if ($make_zip && !empty($meta_map['zip320'])) {
             $metas[$meta_map['zip320']] = esc_url_raw($base_url . $zip320);
             $report['links'][]           = ['label' => 'ZIP 320', 'url' => $base_url . $zip320];
@@ -1400,9 +1537,6 @@ function ps_run_album() {
         $report['links'][] = ['label' => 'پوشه‌ی 320', 'url' => $base_url . $folder320 . '/'];
     }
     if ($has128) {
-        if (!empty($meta_map['folder128'])) {
-            $metas[$meta_map['folder128']] = esc_url_raw($base_url . $folder128);
-        }
         if ($make_zip && !empty($meta_map['zip128'])) {
             $metas[$meta_map['zip128']] = esc_url_raw($base_url . $zip128);
             $report['links'][]           = ['label' => 'ZIP 128', 'url' => $base_url . $zip128];
@@ -1411,18 +1545,18 @@ function ps_run_album() {
     }
 
     ps_apply_metas($post_id, $metas + [
-        'online'        => esc_url_raw($online),
         'artist'        => $artist,
         'song'          => $song,
         'artist_en'     => $artist_en,
         'song_en'       => $song_en,
         '_postsaz_type' => $type['key'],
         '_postsaz_time' => current_time('mysql'),
-    ]);
+    ] + ps_type_metas($type));
     ps_row($report, 'قطعه‌ها', count($tracks) . ' قطعه' . ($has320 ? ' — 320' : '') . ($has128 ? ' — 128' : '') . ($make_zip ? ' — با فایل ZIP' : ''));
+    $repeater_result = ps_acf_update_repeater($post_id, !empty($repeater['field']) ? (string) $repeater['field'] : 'album', $rows);
+    ps_row($report, 'لیست قطعه‌ها', $repeater_result['text'], $repeater_result['ok'] ? 'ok' : 'warn');
 
-    list($acf_overrides, $acf_note) = ps_acf_overrides($type, $post_id);
-    ps_row($report, 'ACF', ps_acf_report_text(bm_acf_sync_post_fields($post_id, $acf_overrides), $acf_note));
+    ps_row($report, 'ACF', ps_acf_sync($post_id, $type));
 
     $image = ps_featured_image($post_id, $cover['url'], $names['img_name'], $names['title'], $names['alt']);
     ps_row($report, 'تصویر شاخص', $image['message'], $image['success'] ? 'ok' : ($cover['url'] === '' ? 'warn' : 'error'));
