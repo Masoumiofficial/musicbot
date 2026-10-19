@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AhangBan SEO
  * Description: noindex کردن صفحه‌های تگ (تگ در سایت استفاده نمی‌شود) + اسکیمای MusicRecording (JSON-LD) برای پست‌های آهنگ
- * Version:     1.1.1
+ * Version:     1.2.0
  * Author:      AhangBan
  *
  * محل قرارگیری:  wp-content/mu-plugins/ahangban-seo.php
@@ -14,7 +14,8 @@
  *    (اگر روزی خواستید دوباره از تگ استفاده کنید، AHANGBAN_NOINDEX_ALL_TAGS را false کنید؛ در آن حالت
  *    فقط تگ‌هایی که کمتر از AHANGBAN_TAG_MIN_POSTS پست دارند noindex می‌شوند.)
  * 2) برای هر پست آهنگ (که متاهای song و artist دارد) اسکیمای MusicRecording خروجی می‌دهد:
- *    نام آهنگ، خواننده، سبک، تصویر، فایل صوتی، تاریخ انتشار، آهنگساز/ترانه‌سرا/تنظیم و متن ترانه.
+ *    نام آهنگ، خواننده (اگر چند هنرمند داشته باشد، هر کدام با لینک صفحه‌ی خودش)، سبک، تصویر،
+ *    فایل صوتی، تاریخ انتشار، آهنگساز/ترانه‌سرا/تنظیم و متن ترانه.
  */
 
 if (!defined('ABSPATH')) {
@@ -133,29 +134,40 @@ function ahangban_build_music_schema($post_id) {
     $permalink = get_permalink($post_id);
     $image     = get_the_post_thumbnail_url($post_id, 'full');
 
-    // لینک آرشیو خواننده (taxonomy هنرمند: «artist»؛ روی سایت‌های قدیمی «singer»)
-    $artist_url   = '';
-    $singer_terms = false;
+    // هنرمند(ان) از taxonomy هنرمند («artist»؛ روی سایت‌های قدیمی «singer») — هر ترم با لینک صفحه‌ی خودش
+    $term_artists = [];
     foreach (['artist', 'singer'] as $artist_taxonomy) {
         if (taxonomy_exists($artist_taxonomy)) {
             $singer_terms = get_the_terms($post_id, $artist_taxonomy);
+            if (is_array($singer_terms)) {
+                foreach ($singer_terms as $singer_term) {
+                    $entry = [
+                        '@type' => preg_match('/گروه/u', $singer_term->name) ? 'MusicGroup' : 'Person',
+                        'name'  => $singer_term->name,
+                    ];
+                    $link = get_term_link($singer_term);
+                    if (!is_wp_error($link)) {
+                        $entry['url'] = $link;
+                    }
+                    $term_artists[] = $entry;
+                }
+            }
             break;
         }
     }
-    if (is_array($singer_terms) && !empty($singer_terms)) {
-        $link = get_term_link($singer_terms[0]);
-        if (!is_wp_error($link)) {
-            $artist_url = $link;
-        }
-    }
 
-    $is_band   = preg_match('/\b(band|group|boys|brothers)\b/i', $artist_en) || preg_match('/گروه/u', $artist);
-    $by_artist = ['@type' => $is_band ? 'MusicGroup' : 'Person', 'name' => $artist];
-    if ($artist_en !== '' && $artist_en !== $artist) {
-        $by_artist['alternateName'] = $artist_en;
-    }
-    if ($artist_url !== '') {
-        $by_artist['url'] = $artist_url;
+    if (count($term_artists) > 1) {
+        // چند هنرمند (مثلاً «همایون شجریان و تهمورس پورناظری»): هر کدام جدا
+        $by_artist = $term_artists;
+    } else {
+        $is_band   = preg_match('/\b(band|group|boys|brothers)\b/i', $artist_en) || preg_match('/گروه/u', $artist);
+        $by_artist = ['@type' => $is_band ? 'MusicGroup' : 'Person', 'name' => $artist];
+        if ($artist_en !== '' && $artist_en !== $artist) {
+            $by_artist['alternateName'] = $artist_en;
+        }
+        if (!empty($term_artists[0]['url'])) {
+            $by_artist['url'] = $term_artists[0]['url'];
+        }
     }
 
     $schema = [

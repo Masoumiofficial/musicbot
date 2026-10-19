@@ -161,7 +161,7 @@ $(function () {
             <span class="info-dot"></span>
             <div>
                 <strong>ارسال AJAX</strong>
-                <small>بدون رفرش صفحه و به‌صورت تک‌به‌تک</small>
+                <small>تک‌به‌تک، از قدیمی‌ترین به جدیدترین</small>
             </div>
         </div>
     </section>
@@ -188,7 +188,7 @@ $(function () {
             <div class="list-head-title">
                 <div>
                     <span class="panel-kicker">ARCHIVE</span>
-                    <h2>لیست مطالب</h2>
+                    <h2>لیست مطالب <small style="font-size:.6em;font-weight:normal;opacity:.75">(قدیمی‌ترین → جدیدترین؛ «ارسال همه» به همین ترتیب)</small></h2>
                 </div>
                 <span class="count-badge"><b class="remaining-count">0</b> مطلب</span>
             </div>
@@ -209,8 +209,10 @@ $(function () {
         }
 
         preg_match_all('/(<article class="item ">.*<\/article>)/isU', $source, $posts);
-        $x = 0;
 
+        // سایت مبدأ جدیدترین آهنگ را اول نشان می‌دهد؛ لیست برعکس می‌شود تا از قدیمی‌ترین به جدیدترین
+        // چیده شود و «ارسال همه» به همین ترتیب (قدیمی‌ترین اول) منتشر کند: آخرین پست سایت = جدیدترین آهنگ
+        $items = [];
         foreach ($posts[0] as $vale) {
             preg_match('/<a[^>]*href="([^"]*)"[^>]*>/i', $vale, $Output2);
             $url = isset($Output2[1]) ? trim($Output2[1]) : '';
@@ -220,6 +222,16 @@ $(function () {
 
             preg_match('/(<span class="songname">.*<\/span>)/isU', $vale, $songname);
             $song = isset($songname[0]) ? trim(strip_tags($songname[0])) : '';
+
+            $items[] = ['url' => $url, 'artist' => $artistName, 'song' => $song];
+        }
+        $items = array_reverse($items);
+
+        $x = 0;
+        foreach ($items as $item) {
+            $url        = $item['url'];
+            $artistName = $item['artist'];
+            $song       = $item['song'];
 
             $title = "دانلود آهنگ {$artistName} {$song}";
             $safeTitle = esc_html($title);
@@ -346,7 +358,7 @@ $(function () {
         successEl.text("0");
         failEl.text("0");
         setProgress(0, total);
-        statusEl.text("مطالب به‌صورت تکی و پشت‌سرهم ارسال می‌شوند.");
+        statusEl.text("مطالب تک‌به‌تک و پشت‌سرهم، از قدیمی‌ترین به جدیدترین ارسال می‌شوند.");
         currentPost.html('<span class="bulk-current-dot"></span><span>آماده‌سازی ارسال...</span>');
     }
 

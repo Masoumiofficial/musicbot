@@ -581,10 +581,148 @@ function bm_artist_taxonomy($configured = '') {
 }
 
 /**
- * ساخت (یا پیدا کردن) ترم خواننده
+ * نامک انگلیسی ترم هنرمند از روی نام انگلیسی
+ * مثال: «Kasra Zahedi» => «kasra-zahedi»
+ * فقط اگر نامک واقعاً انگلیسی (ASCII) باشد برمی‌گردد؛ وگرنه رشته‌ی خالی
+ */
+function bm_artist_term_slug($artist_en) {
+    $slug = sanitize_title(remove_accents(bm_clean_text($artist_en)));
+    if ($slug === '' || preg_match('/[^a-z0-9\-]/', $slug)) {
+        return '';
+    }
+    return $slug;
+}
+
+/**
+ * جدا کردن نام چند هنرمند از یک رشته
+ * «همایون شجریان و تهمورس پورناظری» => ['همایون شجریان', 'تهمورس پورناظری']
+ * «Homayoun Shajarian & Tahmoures Pournazeri» / «A Ft B» / «A, B» => ['Homayoun Shajarian', 'Tahmoures Pournazeri']
+ * جداکننده‌ها: « و »، « فیت »، «،» «,» «&» «/» «|» «+» و در انگلیسی feat / ft / featuring / and
+ * خروجی: آرایه‌ی نام‌ها (بدون تکرار)؛ برای ورودی خالی آرایه‌ی خالی
+ */
+function bm_split_artists($value) {
+    $value = bm_clean_text($value);
+    if ($value === '') {
+        return [];
+    }
+
+    $parts = preg_split('/\s*(?:[،,&\/|+]|\s+و\s+|\s+فیت\s+|\s+(?:feat\.?|ft\.?|featuring|and)\s+)\s*/iu', $value);
+    if (!is_array($parts)) {
+        $parts = [$value];
+    }
+
+    $names = [];
+    foreach ($parts as $part) {
+        $part = preg_replace('/\s+/u', ' ', (string) $part);
+        $part = preg_replace('/^[\s\-–—.]+|[\s\-–—.]+$/u', '', $part);
+        if ($part === '' || $part === null) {
+            continue;
+        }
+        $key = function_exists('mb_strtolower') ? mb_strtolower($part, 'UTF-8') : strtolower($part);
+        if (!isset($names[$key])) {
+            $names[$key] = $part;
+        }
+    }
+
+    return array_values($names);
+}
+
+/**
+ * ترم(های) هنرمند پست
+ * اگر نام خواننده چند نفر باشد ($split = true)، برای هر نفر یک ترم جدا پیدا/ساخته می‌شود؛
+ * نامک انگلیسی هر نفر از بخش هم‌ردیفِ نام انگلیسی برداشته می‌شود (ترم‌هایی که از قبل وجود دارند،
+ * نامک خودشان را نگه می‌دارند و همان نامک از فهرست نامک‌های آزاد کنار گذاشته می‌شود تا اگر ترتیب
+ * نام‌های فارسی و انگلیسی فرق داشت، نامک اشتباهی به هنرمند جدید نرسد). اگر برای کسی نام انگلیسی
+ * نبود، ترم بدون نامک دستی ساخته می‌شود و در اولین پست بعدی که نام انگلیسی‌اش معلوم شود اصلاح می‌شود.
+ * $taxonomy: نام داخلی taxonomy هنرمند (خالی = تشخیص خودکار)
+ * خروجی: ['taxonomy' => نام taxonomy, 'artists' => [['name' => نام, 'id' => شناسه ترم یا 0, 'link' => لینک یا ''], ...]]
+ */
+function bm_get_artist_terms($artist, $artist_en, $taxonomy = '', $split = true) {
+    if ($taxonomy === '') {
+        $taxonomy = bm_artist_taxonomy();
+    }
+
+    $artist    = bm_clean_text($artist);
+    $artist_en = bm_clean_text($artist_en);
+
+    $names = $split ? bm_split_artists($artist) : ($artist !== '' ? [$artist] : []);
+    $result = ['taxonomy' => $taxonomy, 'artists' => []];
+    if (empty($names)) {
+        return $result;
+    }
+
+    $count = count($names);
+    $en_for = array_fill(0, $count, '');
+
+    if ($count === 1) {
+        // یک هنرمند: مثل قبل، نامک از کل نام انگلیسی
+        $en_for[0] = $artist_en;
+    } else {
+        $en_names = bm_split_artists($artist_en);
+        $pool     = [];
+        foreach ($en_names as $en_name) {
+            $en_slug = bm_artist_term_slug($en_name);
+            if ($en_slug !== '' && !in_array($en_slug, $pool, true)) {
+                $pool[] = $en_slug;
+            }
+        }
+
+        // ترم‌های موجود، نامک خودشان را از فهرست آزاد برمی‌دارند
+        if ($taxonomy !== '' && taxonomy_exists($taxonomy)) {
+            foreach ($names as $i => $name) {
+                $found = term_exists($name, $taxonomy);
+                if (!$found) {
+                    continue;
+                }
+                $term_obj = get_term(is_array($found) ? (int) $found['term_id'] : (int) $found, $taxonomy);
+                if (!$term_obj || is_wp_error($term_obj)) {
+                    continue;
+                }
+                $k = array_search($term_obj->slug, $pool, true);
+                if ($k !== false) {
+                    $en_for[$i] = $term_obj->slug;
+                    unset($pool[$k]);
+                    $pool = array_values($pool);
+                }
+            }
+        }
+
+        // بقیه: اگر تعداد نام‌های فارسی و انگلیسی برابر بود نامک هم‌ردیف، وگرنه به ترتیب از فهرست آزاد
+        foreach ($names as $i => $name) {
+            if ($en_for[$i] !== '' || empty($pool)) {
+                continue;
+            }
+            $k = 0;
+            if ($count === count($en_names)) {
+                $k_same = array_search(bm_artist_term_slug($en_names[$i]), $pool, true);
+                if ($k_same !== false) {
+                    $k = $k_same;
+                }
+            }
+            $en_for[$i] = $pool[$k];
+            unset($pool[$k]);
+            $pool = array_values($pool);
+        }
+    }
+
+    foreach ($names as $i => $name) {
+        $term = bm_get_singer_term($name, $en_for[$i], $taxonomy);
+        $result['artists'][] = [
+            'name' => $name,
+            'id'   => (int) $term['id'],
+            'link' => $term['link'],
+        ];
+    }
+
+    return $result;
+}
+
+/**
+ * ساخت (یا پیدا کردن) ترم یک خواننده
  * نام ترم = $artist (فارسی) | نامک ترم = $artist_en (انگلیسی)
  * مثال: نام «کسری زاهدی» و نامک «kasra-zahedi»
  * اگر ترم از قبل با نامک فارسی ساخته شده باشد، نامکش به انگلیسی اصلاح می‌شود
+ * (نامک انگلیسیِ ترم‌های موجود دست نمی‌خورد تا آدرس آرشیو هنرمند عوض نشود)
  * $taxonomy: نام داخلی taxonomy هنرمند (خالی = تشخیص خودکار با bm_artist_taxonomy)
  * خروجی: ['id' => شناسه ترم, 'link' => لینک آرشیو خواننده, 'taxonomy' => نام taxonomy]
  */
@@ -600,12 +738,8 @@ function bm_get_singer_term($artist, $artist_en, $taxonomy = '') {
         return $result;
     }
 
-    // نامک انگلیسی از روی نام انگلیسی خواننده
-    $slug = sanitize_title(remove_accents(bm_clean_text($artist_en)));
-    // فقط اگر نامک واقعاً انگلیسی (ASCII) باشد استفاده می‌شود
-    if ($slug === '' || preg_match('/[^a-z0-9\-]/', $slug)) {
-        $slug = '';
-    }
+    // نامک انگلیسی از روی نام انگلیسی خواننده (فقط اگر واقعاً انگلیسی باشد)
+    $slug = bm_artist_term_slug($artist_en);
 
     // پیدا کردن ترم با نام فارسی
     $term_id = 0;
@@ -635,9 +769,10 @@ function bm_get_singer_term($artist, $artist_en, $taxonomy = '') {
             $term_id = (int) $new['term_id'];
         }
     } elseif ($slug !== '') {
-        // ترم قبلاً وجود داشته؛ اگر نامکش انگلیسی نیست اصلاح کن
+        // ترم قبلاً وجود داشته؛ فقط اگر نامکش انگلیسی نیست (مثلاً فارسیِ درصدی) اصلاح کن
         $term_obj = get_term($term_id, $taxonomy);
-        if ($term_obj && !is_wp_error($term_obj) && $term_obj->slug !== $slug) {
+        if ($term_obj && !is_wp_error($term_obj) && $term_obj->slug !== $slug
+            && ($term_obj->slug === '' || preg_match('/[^a-z0-9\-]/', $term_obj->slug))) {
             wp_update_term($term_id, $taxonomy, ['slug' => $slug]);
         }
     }
@@ -661,6 +796,8 @@ function bm_build_post_content($args = []) {
     $song_en     = $args['song_en'] ?? '';
     $music_url   = $args['music_url'] ?? '';
     $singer_link = $args['singer_link'] ?? '';
+    // چند هنرمند: [['name' => نام, 'link' => لینک آرشیو], ...] (خروجی bm_get_artist_terms)
+    $artists     = (isset($args['artists']) && is_array($args['artists'])) ? $args['artists'] : [];
 
     // لینک آهنگ جدید
     $music_html = '<strong>دانلود آهنگ جدید</strong>';
@@ -668,11 +805,23 @@ function bm_build_post_content($args = []) {
         $music_html = '<a href="' . esc_url($music_url) . '">' . $music_html . '</a>';
     }
 
-    // لینک خواننده
-    $singer_html = '<strong>' . esc_html($artist) . '</strong>';
-    if ($singer_link !== '') {
-        $singer_html = '<a class="ty-singer-link" href="' . esc_url($singer_link) . '">' . $singer_html . '</a>';
+    // لینک خواننده (هر هنرمند به صفحه‌ی خودش؛ با « و » کنار هم)
+    if (empty($artists)) {
+        $artists = [['name' => $artist, 'link' => $singer_link]];
     }
+    $singer_parts = [];
+    foreach ($artists as $one) {
+        $name = isset($one['name']) ? bm_clean_text($one['name']) : '';
+        if ($name === '') {
+            continue;
+        }
+        $one_html = '<strong>' . esc_html($name) . '</strong>';
+        if (!empty($one['link'])) {
+            $one_html = '<a class="ty-singer-link" href="' . esc_url($one['link']) . '">' . $one_html . '</a>';
+        }
+        $singer_parts[] = $one_html;
+    }
+    $singer_html = !empty($singer_parts) ? implode(' و ', $singer_parts) : '<strong>' . esc_html($artist) . '</strong>';
 
     $html  = '<p dir="rtl" lang="fa" style="text-align: center;">' . $music_html . ' ' . $singer_html . ' به نام <strong>' . esc_html($song) . '</strong></p>';
     $html .= "\n\n\n";
@@ -803,7 +952,15 @@ if (!empty($functions_dl_music) && $dl_userpwd === '') {
  * ------------------------------------------------------ */
 // taxonomy هنرمند: از config.php ($bot_artist_taxonomy)، وگرنه تشخیص خودکار artist/singer
 $artist_taxonomy = bm_artist_taxonomy(isset($bot_artist_taxonomy) ? $bot_artist_taxonomy : '');
-$singer_term     = bm_get_singer_term($artist, $artist_en, $artist_taxonomy);
+
+// ترم هنرمند(ان): اگر خواننده چند نفر باشد («همایون شجریان و تهمورس پورناظری») برای هر نفر یک ترم
+// ($bot_split_artists در config.php؛ پیش‌فرض فعال). عنوان، متاها و نام فایل‌ها همان نام کامل می‌مانند.
+$artist_terms = bm_get_artist_terms(
+    $artist,
+    $artist_en,
+    $artist_taxonomy,
+    !isset($bot_split_artists) || !empty($bot_split_artists)
+);
 
 $my_post_content = bm_build_post_content([
     'artist'      => $artist,
@@ -811,7 +968,7 @@ $my_post_content = bm_build_post_content([
     'artist_en'   => $artist_en,
     'song_en'     => $song_en,
     'music_url'   => trailingslashit($urlsite) . 'music/',
-    'singer_link' => $singer_term['link'],
+    'artists'     => $artist_terms['artists'],
 ]);
 
 /* -------------------------------------------------------
@@ -877,7 +1034,8 @@ foreach ($meta_updates as $key => $value) {
 /* -------------------------------------------------------
  |  9) taxonomyها
  |  به پست‌ها تگ (post_tag) داده نمی‌شود: آرشیو خواننده را taxonomy هنرمند («artist»؛ قبلاً «singer»،
- |  قابل تنظیم با $bot_artist_taxonomy)، «دانلود آهنگ» را دسته‌بندی و سبک/حال‌وهوا را «genre» و «mood» پوشش می‌دهند.
+ |  قابل تنظیم با $bot_artist_taxonomy؛ برای هر خواننده‌ی آهنگ یک ترم)، «دانلود آهنگ» را دسته‌بندی و
+ |  سبک/حال‌وهوا را «genre» و «mood» پوشش می‌دهند.
  |  تگ فقط صفحه‌های آرشیو تکراری یا تک‌پستی می‌سازد که برای سئو ضرر دارد.
  * ------------------------------------------------------ */
 
@@ -904,12 +1062,14 @@ if (taxonomy_exists('category') && !empty($post_categories)) {
     update_post_meta($post_id, 'rank_math_primary_category', (int) $post_categories[0]);
 }
 
-// تاکسونومی‌های اختصاصی
+// تاکسونومی‌های اختصاصی (هنرمند: همه‌ی ترم‌ها؛ اگر ترمی ساخته نشده بود با نام ست می‌شود تا وردپرس خودش بسازد)
 if ($artist_taxonomy !== '') {
-    if (!empty($singer_term['id'])) {
-        wp_set_object_terms($post_id, [(int) $singer_term['id']], $artist_taxonomy, false);
-    } else {
-        bm_set_term_if_not_empty($post_id, $artist, $artist_taxonomy, false);
+    $artist_term_ids = [];
+    foreach ($artist_terms['artists'] as $one_artist) {
+        $artist_term_ids[] = !empty($one_artist['id']) ? (int) $one_artist['id'] : (string) $one_artist['name'];
+    }
+    if (!empty($artist_term_ids)) {
+        wp_set_object_terms($post_id, $artist_term_ids, $artist_taxonomy, false);
     }
 }
 bm_set_term_if_not_empty($post_id, $mood, 'mood', false);
@@ -1065,8 +1225,12 @@ echo 'دسته‌بندی‌ها: ' . esc_html(implode(', ', $post_categories)) 
 if ($artist_taxonomy === '') {
     echo 'هنرمند: ثبت نشد — taxonomy هنرمند (artist/singer) در سایت پیدا نشد<br>';
 } else {
-    echo 'هنرمند: ' . esc_html($artist) . ' (taxonomy ' . esc_html($artist_taxonomy)
-        . (!empty($singer_term['id']) ? '، ترم ' . intval($singer_term['id']) : '') . ')<br>';
+    $artist_report = [];
+    foreach ($artist_terms['artists'] as $one_artist) {
+        $artist_report[] = $one_artist['name'] . (!empty($one_artist['id']) ? ' (ترم ' . intval($one_artist['id']) . ')' : ' (ترم ساخته نشد)');
+    }
+    echo 'هنرمند: ' . esc_html(implode('، ', $artist_report)) . ' — taxonomy ' . esc_html($artist_taxonomy)
+        . (count($artist_report) > 1 ? '، ' . count($artist_report) . ' هنرمند جدا' : '') . '<br>';
 }
 
 if (is_array($download_response)) {
