@@ -1,0 +1,21 @@
+# پاس دادن هدر Authorization به PHP
+# (لازم برای هاست‌هایی که PHP را به صورت CGI/FastCGI اجرا می‌کنند؛ در بقیه بی‌اثر است)
+<IfModule mod_setenvif.c>
+    SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+</IfModule>
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+</IfModule>
+
+# فقط index.php و submit.php از بیرون صدا زده می‌شوند؛ بقیه فایل‌های داخلی‌اند
+<FilesMatch "^(config|engine|ui)\.php$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
