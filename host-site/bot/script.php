@@ -604,6 +604,100 @@ function bm_artist_term_slug($artist_en) {
 }
 
 /**
+ * شکل نرمال‌شده‌ی یک نام برای مقایسه: حروف کوچک، بدون فاصله/نیم‌فاصله/خط تیره/نقطه/اعراب،
+ * ي→ی ، ك→ک ، ة→ه.  «محمد رضا شجریان» و «محمدرضا شجریان» و «mohammad-reza-shajarian» یکی می‌شوند
+ */
+function bm_normalize_name($text) {
+    $text = mb_strtolower(bm_clean_text($text), 'UTF-8');
+    $text = str_replace(["\xD9\x8A", "\xD9\x83", "\xD8\xA9"], ["\xDB\x8C", "\xDA\xA9", "\xD9\x87"], $text);
+    $text = preg_replace('/[\x{064B}-\x{0652}\x{0670}\x{0640}]/u', '', $text);
+    $text = preg_replace('/[\s\x{200B}-\x{200F}\-_\.\x{060C},]+/u', '', $text);
+    return (string) $text;
+}
+
+/**
+ * ترم هنرمندی که «عملاً» همین نام است ولی با املای دیگری ثبت شده
+ * (فاصله/نیم‌فاصله یا ي/ك عربی) یا نامک انگلیسی‌اش همین است.
+ * خروجی: شناسه‌ی ترم یا 0
+ */
+function bm_find_similar_artist_term($artist, $slug, $taxonomy) {
+    static $cache = [];
+
+    if ($taxonomy === '' || !function_exists('get_terms')) {
+        return 0;
+    }
+    if (!isset($cache[$taxonomy])) {
+        $cache[$taxonomy] = ['names' => [], 'slugs' => []];
+        $terms = get_terms(['taxonomy' => $taxonomy, 'hide_empty' => false]);
+        if (is_array($terms)) {
+            foreach ($terms as $term) {
+                if (!is_object($term) || empty($term->term_id)) {
+                    continue;
+                }
+                $name_key = bm_normalize_name($term->name);
+                $slug_key = bm_normalize_name($term->slug);
+                if ($name_key !== '' && !isset($cache[$taxonomy]['names'][$name_key])) {
+                    $cache[$taxonomy]['names'][$name_key] = (int) $term->term_id;
+                }
+                if ($slug_key !== '' && !isset($cache[$taxonomy]['slugs'][$slug_key])) {
+                    $cache[$taxonomy]['slugs'][$slug_key] = (int) $term->term_id;
+                }
+            }
+        }
+    }
+
+    $name_key = bm_normalize_name($artist);
+    if ($name_key !== '' && isset($cache[$taxonomy]['names'][$name_key])) {
+        return $cache[$taxonomy]['names'][$name_key];
+    }
+    $slug_key = bm_normalize_name($slug);
+    if ($slug_key !== '' && isset($cache[$taxonomy]['slugs'][$slug_key])) {
+        return $cache[$taxonomy]['slugs'][$slug_key];
+    }
+    return 0;
+}
+
+/** شناسه‌ی پستی با این عنوان (منتشرشده، پیش‌نویس، در انتظار یا زمان‌بندی‌شده) یا 0 */
+function bm_post_id_by_title($title) {
+    global $wpdb;
+    return (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT ID FROM {$wpdb->posts}
+         WHERE post_title = %s
+         AND post_type = 'post'
+         AND post_status IN ('publish', 'draft', 'pending', 'future')
+         ORDER BY ID ASC LIMIT 1",
+        $title
+    ));
+}
+
+/** شناسه‌ی پستی که از همین لینک مبدأ ساخته شده (متای _bm_source_url) یا 0 */
+function bm_post_id_by_source_url($url) {
+    global $wpdb;
+    $url = trim((string) $url);
+    if ($url === '') {
+        return 0;
+    }
+    return (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT p.ID FROM {$wpdb->posts} p
+         INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID
+         WHERE m.meta_key = '_bm_source_url' AND m.meta_value = %s
+         AND p.post_type = 'post'
+         AND p.post_status IN ('publish', 'draft', 'pending', 'future')
+         ORDER BY p.ID ASC LIMIT 1",
+        $url
+    ));
+}
+
+/**
+ * نشانگر ماشین‌خوان نتیجه برای اسکریپت‌های دیگر (آرشیو هنرمندان): در خروجی HTML به شکل کامنت می‌آید
+ * status: ok | exists | error
+ */
+function bm_result_marker($status, array $data = []) {
+    $data = array_merge(['status' => $status], $data);
+    return "\n<!--BM_RESULT " . str_replace('-->', '--\u003e', wp_json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) . " -->\n";
+}
+
+/**
  * جدا کردن نام چند هنرمند از یک رشته
  * «همایون شجریان و تهمورس پورناظری» => ['همایون شجریان', 'تهمورس پورناظری']
  * «Homayoun Shajarian & Tahmoures Pournazeri» / «A Ft B» / «A, B» => ['Homayoun Shajarian', 'Tahmoures Pournazeri']
@@ -758,6 +852,12 @@ function bm_get_singer_term($artist, $artist_en, $taxonomy = '') {
         $term_id = is_array($found) ? (int) $found['term_id'] : (int) $found;
     }
 
+    // اگر نبود: همین هنرمند با املای دیگر («محمد رضا» / «محمدرضا»، ي/ك عربی) یا با همین نامک انگلیسی
+    // ثبت شده؟ از همان ترم استفاده می‌شود تا برای یک خواننده دو آرشیو ساخته نشود
+    if (!$term_id) {
+        $term_id = bm_find_similar_artist_term($artist, $slug, $taxonomy);
+    }
+
     // اگر نبود، با نام فارسی و نامک انگلیسی بساز
     if (!$term_id) {
         $args = ($slug !== '') ? ['slug' => $slug] : [];
@@ -849,22 +949,20 @@ $api_response = bm_curl_post_json($apiUrl, [
 ]);
 
 if (!$api_response['success']) {
-    exit(
-        'خطا در ارتباط با API. ' .
-        'HTTP: ' . intval($api_response['code']) .
-        ' | cURL: ' . esc_html($api_response['error']) .
-        ' | Response: ' . esc_html(mb_substr((string) $api_response['response'], 0, 500))
-    );
+    $api_fail = 'خطا در ارتباط با API. HTTP: ' . intval($api_response['code'])
+        . ' | cURL: ' . $api_response['error']
+        . ' | Response: ' . mb_substr((string) $api_response['response'], 0, 500);
+    exit(esc_html($api_fail) . bm_result_marker('error', ['reason' => 'api', 'message' => $api_fail]));
 }
 
 $result = json_decode($api_response['response'], true);
 
 if (!is_array($result)) {
-    exit('خطا: پاسخ API معتبر نیست.');
+    exit('خطا: پاسخ API معتبر نیست.' . bm_result_marker('error', ['reason' => 'api', 'message' => 'پاسخ API معتبر نیست']));
 }
 
 if (!empty($result['error'])) {
-    exit('API Error: ' . esc_html($result['error']));
+    exit('API Error: ' . esc_html($result['error']) . bm_result_marker('error', ['reason' => 'api', 'message' => 'API: ' . $result['error']]));
 }
 
 /* -------------------------------------------------------
@@ -900,7 +998,7 @@ $matnmusic  = trim($result['matnmusic'] ?? '');
  |  3) اعتبارسنجی داده‌های حیاتی
  * ------------------------------------------------------ */
 if ($artist === '' || $song === '') {
-    exit('خطا: نام خواننده یا نام آهنگ از API دریافت نشد.');
+    exit('خطا: نام خواننده یا نام آهنگ از API دریافت نشد.' . bm_result_marker('error', ['reason' => 'api', 'message' => 'نام خواننده یا نام آهنگ از API دریافت نشد']));
 }
 
 if ($artist_en === '') {
@@ -909,6 +1007,54 @@ if ($artist_en === '') {
 
 if ($song_en === '') {
     $song_en = $song;
+}
+
+/* -------------------------------------------------------
+ |  3-1) جلوگیری از پست تکراری
+ |  الف) همین لینک مبدأ قبلاً ثبت شده (متای _bm_source_url) → همیشه رد می‌شود
+ |  ب) عنوان یکسان ولی لینک مبدأ دیگر (قطعه‌ی دیگری با نام عمومی مثل «ساز و آواز» یا «ربنا»):
+ |     اگر $bm_same_title = 'number' باشد (ارسال دستی/آرشیو با گزینه‌ی «ثبت با شماره») با شماره‌ی تمایز
+ |     ثبت می‌شود: «ساز و آواز (2)» و نام فایل «… - Saz o Avaz 2 [320].mp3»؛ وگرنه (پیش‌فرض و ارسال
+ |     خودکار) رد می‌شود. پست‌های قدیمی که لینک مبدأ ندارند فقط با عنوان مقایسه می‌شوند.
+ * ------------------------------------------------------ */
+$bm_same_title_note = '';
+$bm_artist_note     = '';
+$same_title_mode    = isset($bm_same_title) ? (string) $bm_same_title : (isset($bot_same_title) ? (string) $bot_same_title : 'skip');
+
+// املای نام هنرمند: اگر همین هنرمند با املای دیگری در سایت ثبت شده («محمد رضا شجریان» ← «محمدرضا شجریان»)،
+// نام ثبت‌شده مبنا می‌شود تا عنوان، متا و ترم همه یکدست بمانند (فقط برای نام تک‌نفره)
+$bm_artist_tax_early = bm_artist_taxonomy(isset($bot_artist_taxonomy) ? $bot_artist_taxonomy : '');
+if ($bm_artist_tax_early !== '' && count(bm_split_artists($artist)) === 1 && !term_exists($artist, $bm_artist_tax_early)) {
+    $similar_id = bm_find_similar_artist_term($artist, bm_artist_term_slug($artist_en), $bm_artist_tax_early);
+    if ($similar_id) {
+        $similar_term = get_term($similar_id, $bm_artist_tax_early);
+        if ($similar_term && !is_wp_error($similar_term) && $similar_term->name !== $artist) {
+            $bm_artist_note = 'نام هنرمند «' . $artist . '» با ترم موجود «' . $similar_term->name . '» (ترم ' . $similar_id . ') یکی گرفته شد';
+            $artist = bm_clean_text($similar_term->name);
+        }
+    }
+}
+
+$source_exists = bm_post_id_by_source_url($postUrl);
+if ($source_exists) {
+    exit('همین آهنگ (همین لینک مبدأ) قبلاً ثبت شده است. ID: ' . intval($source_exists)
+        . bm_result_marker('exists', ['reason' => 'source', 'post_id' => $source_exists, 'link' => get_permalink($source_exists), 'message' => 'همین لینک قبلاً ثبت شده (ID ' . $source_exists . ')']));
+}
+
+$title_exists = bm_post_id_by_title(trim("دانلود آهنگ {$artist} {$song}"));
+if ($title_exists) {
+    if ($same_title_mode !== 'number') {
+        exit('پست با این عنوان قبلاً ثبت شده است. ID: ' . intval($title_exists)
+            . ' — اگر قطعه‌ی دیگری با همین نام است، با گزینه‌ی «ثبت با شماره» دوباره بفرستید.'
+            . bm_result_marker('exists', ['reason' => 'title', 'post_id' => $title_exists, 'link' => get_permalink($title_exists), 'message' => 'پستی با همین عنوان هست (ID ' . $title_exists . ')']));
+    }
+    $same_n = 2;
+    while ($same_n < 100 && bm_post_id_by_title(trim("دانلود آهنگ {$artist} {$song} ({$same_n})"))) {
+        $same_n++;
+    }
+    $song    .= " ({$same_n})";
+    $song_en .= " {$same_n}";
+    $bm_same_title_note = "عنوان تکراری بود (پست ID {$title_exists})؛ با شماره‌ی {$same_n} ثبت شد";
 }
 
 /* -------------------------------------------------------
@@ -934,19 +1080,8 @@ $mp3_file_320 = "{$mp3_name} [320].mp3";
 $mp3_file_128 = "{$mp3_name} [128].mp3";
 
 /* -------------------------------------------------------
- |  5) جلوگیری از پست تکراری
+ |  5) جلوگیری از پست تکراری → به بخش 3-1 منتقل شد (قبل از ساخت نام‌ها)
  * ------------------------------------------------------ */
-$post_exists = $wpdb->get_var($wpdb->prepare(
-    "SELECT ID FROM {$wpdb->posts}
-     WHERE post_title = %s
-     AND post_type = 'post'
-     AND post_status IN ('publish', 'draft', 'pending', 'future')",
-    $mytitle
-));
-
-if ($post_exists) {
-    exit('پست با این عنوان قبلاً ثبت شده است. ID: ' . intval($post_exists));
-}
 
 /* -------------------------------------------------------
  |  5-1) یوزر/رمز اتصال به هاست دانلود (قبل از ساخت پست بررسی می‌شود تا پست بدون فایل ساخته نشود)
@@ -1012,8 +1147,11 @@ $post_id = wp_insert_post($post_data, true);
 
 if (is_wp_error($post_id) || !$post_id) {
     $msg = is_wp_error($post_id) ? $post_id->get_error_message() : 'Unknown error';
-    exit('خطا در ایجاد پست: ' . esc_html($msg));
+    exit('خطا در ایجاد پست: ' . esc_html($msg) . bm_result_marker('error', ['reason' => 'insert', 'message' => 'خطا در ایجاد پست: ' . $msg]));
 }
+
+// لینک مبدأ روی پست می‌ماند تا همان آهنگ دوباره ثبت نشود (و آرشیو هنرمندان وضعیت را دقیق نشان دهد)
+update_post_meta($post_id, '_bm_source_url', esc_url_raw($postUrl));
 
 /* -------------------------------------------------------
  |  8) سئو (Yoast)
@@ -1219,6 +1357,12 @@ echo '<div style="direction:rtl;text-align:right;background:#fff;border:1px soli
 echo '<strong>پست با موفقیت ساخته شد.</strong><br>';
 echo 'ID پست: ' . intval($post_id) . '<br>';
 echo 'عنوان: ' . esc_html($mytitle) . '<br>';
+if ($bm_same_title_note !== '') {
+    echo 'عنوان تکراری: ' . esc_html($bm_same_title_note) . '<br>';
+}
+if ($bm_artist_note !== '') {
+    echo 'املای هنرمند: ' . esc_html($bm_artist_note) . '<br>';
+}
 echo 'تصویر شاخص: ' . esc_html($image_result['message']) . '<br>';
 $author_user = get_userdata($post_author_id);
 echo 'نویسنده: ' . esc_html($author_user ? $author_user->display_name . ' (' . $author_user->user_login . ' — ID ' . $post_author_id . ')' : 'ID ' . $post_author_id) . '<br>';
@@ -1262,3 +1406,11 @@ if (is_array($download_response)) {
 }
 
 echo '</div>';
+echo bm_result_marker('ok', [
+    'post_id'   => (int) $post_id,
+    'link'      => get_permalink($post_id),
+    'title'     => $mytitle,
+    'published' => $post_published,
+    'download'  => is_array($download_response) ? (bool) $download_response['success'] : null,
+    'note'      => trim($bm_same_title_note . ($bm_artist_note !== '' ? ($bm_same_title_note !== '' ? '؛ ' : '') . $bm_artist_note : '')),
+]);
