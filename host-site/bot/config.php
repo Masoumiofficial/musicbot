@@ -126,4 +126,4 @@ $bot_watermark_plate         = 'auto';   // 'auto' = مربع برای لوگو�
 $bot_watermark_plate_color   = 'auto';   // 'auto' = رنگ غالبِ پررنگ همان کاور | رنگ ثابت مثل '#1e1e1e'
 $bot_watermark_plate_size    = 13;       // ضلع پلاک مربع، درصد عرض کاور (کاور ۱۰۸۰ → حدود ۱۴۰ پیکسل)؛ پلاک مستطیل از $bot_watermark_width + حاشیه ساخته می‌شود
 $bot_watermark_plate_radius  = 10;       // گردی گوشه‌ها، درصد ضلع کوچک‌تر پلاک (0 = تیز، 50 = کاملاً گرد)
-$bot_watermark_plate_opacity = 100;      // شفافیت پلاک، درصد
+$bot_watermark_plate_opacity = 100;      // پُری پلاک، درصد: 100 = کاملاً پر (مثل رادیوجوان)، 70 = کاور از پشت پلاک کمی دیده می‌شود؛ حداقل 10. لوگو خودش همیشه پر می‌ماند
