@@ -94,14 +94,28 @@ function pz_abs_dir($relative) {
     return $path;
 }
 
+/** User-Agent مرورگر برای دانلود از سایت‌های مبدأ (بعضی CDNها درخواست بدون UA یا با UA ناشناس را 403 می‌کنند) */
+function pz_browser_user_agent() {
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+}
+
 /**
  * دانلود یک URL در مسیر مقصد (استریم؛ کل فایل در حافظه نمی‌آید)
+ * $opts: user_agent (پیش‌فرض: UA مرورگر)، referer (پیش‌فرض: ریشه‌ی همان دامنه)، timeout (ثانیه)
  * خروجی: ['ok' => bool, 'size' => int, 'error' => string, 'http' => int]
  */
-function pz_download($url, $destination) {
+function pz_download($url, $destination, array $opts = []) {
     if (!pz_valid_url($url)) {
         return ['ok' => false, 'size' => 0, 'error' => 'invalid url', 'http' => 0];
     }
+
+    $user_agent = isset($opts['user_agent']) && $opts['user_agent'] !== '' ? (string) $opts['user_agent'] : pz_browser_user_agent();
+    $referer    = isset($opts['referer']) ? (string) $opts['referer'] : '';
+    if ($referer === '') {
+        $host    = (string) parse_url($url, PHP_URL_HOST);
+        $referer = $host !== '' ? ((string) parse_url($url, PHP_URL_SCHEME) ?: 'https') . '://' . $host . '/' : '';
+    }
+    $timeout = isset($opts['timeout']) ? max(10, (int) $opts['timeout']) : 1800;
 
     $handle = @fopen($destination, 'wb');
     if (!$handle) {
@@ -118,16 +132,19 @@ function pz_download($url, $destination) {
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS      => 5,
             CURLOPT_CONNECTTIMEOUT => 30,
-            CURLOPT_TIMEOUT        => 1800,
+            CURLOPT_TIMEOUT        => $timeout,
             CURLOPT_FAILONERROR    => true,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,
-            CURLOPT_USERAGENT      => 'AhangBan-DL/1.0',
+            CURLOPT_USERAGENT      => $user_agent,
+            CURLOPT_REFERER        => $referer,
+            CURLOPT_HTTPHEADER     => ['Accept: */*', 'Accept-Language: fa,en;q=0.8'],
             CURLOPT_PROTOCOLS      => CURLPROTO_HTTP | CURLPROTO_HTTPS,
             CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
         ]);
         $done  = curl_exec($ch);
         $error = curl_error($ch);
+        $errno = curl_errno($ch);
         $http  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if (PHP_VERSION_ID < 80000) {
             curl_close($ch);
@@ -136,12 +153,20 @@ function pz_download($url, $destination) {
         fclose($handle);
         if ($done === false) {
             @unlink($destination);
-            return ['ok' => false, 'size' => 0, 'error' => $error !== '' ? $error : ('HTTP ' . $http), 'http' => $http];
+            $why = $error !== '' ? $error : ('HTTP ' . $http);
+            if ($errno === 22 || ($http >= 400 && $error === '')) {
+                $why = 'HTTP ' . $http . ' از سرور مبدأ' . ($http === 403 ? ' (دسترسی این سرور به فایل مسدود شده)' : ($http === 404 ? ' (فایل در مبدأ نیست)' : ''));
+            } elseif ($errno === 28) {
+                $why = 'زمان انتظار تمام شد (' . $error . ')';
+            } elseif ($errno === 6 || $errno === 7) {
+                $why = 'اتصال به سرور مبدأ برقرار نشد (' . $error . ')';
+            }
+            return ['ok' => false, 'size' => 0, 'error' => $why, 'http' => $http, 'errno' => $errno];
         }
     } else {
         // بدون cURL: جریان http (با ignore_errors خاموش، پاسخ 4xx/5xx باز نمی‌شود)
         $context = stream_context_create([
-            'http' => ['timeout' => 1800, 'follow_location' => 1, 'max_redirects' => 5, 'user_agent' => 'AhangBan-DL/1.0'],
+            'http' => ['timeout' => $timeout, 'follow_location' => 1, 'max_redirects' => 5, 'user_agent' => $user_agent, 'header' => ($referer !== '' ? "Referer: {$referer}\r\n" : '')],
             'ssl'  => ['verify_peer' => false, 'verify_peer_name' => false],
         ]);
         $source = @fopen($url, 'rb', false, $context);
@@ -199,8 +224,8 @@ function pz_sniff($path) {
  * دانلود + بررسی نوع فایل؛ اگر محتوا با نوع موردانتظار نخواند (مثلاً صفحه‌ی HTML خطا) فایل پاک می‌شود
  * $kinds: audio | video | image
  */
-function pz_download_checked($url, $destination, array $kinds) {
-    $result = pz_download($url, $destination);
+function pz_download_checked($url, $destination, array $kinds, array $opts = []) {
+    $result = pz_download($url, $destination, $opts);
     if (!$result['ok']) {
         return $result;
     }

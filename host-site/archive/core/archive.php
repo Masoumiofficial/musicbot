@@ -236,7 +236,7 @@ if (!function_exists('bm_archive_norm')) {
      */
     function bm_archive_parse_bot_response($body) {
         $body   = is_string($body) ? $body : '';
-        $result = ['status' => 'error', 'reason' => 'unknown', 'message' => '', 'post_id' => 0, 'link' => '', 'title' => '', 'note' => '', 'html' => ''];
+        $result = ['status' => 'error', 'reason' => 'unknown', 'message' => '', 'post_id' => 0, 'link' => '', 'title' => '', 'note' => '', 'html' => '', 'warning' => ''];
 
         if (preg_match_all('/<!--BM_RESULT\s+(\{.*?\})\s*-->/su', $body, $m) && !empty($m[1])) {
             $data = json_decode(end($m[1]), true);
@@ -254,7 +254,8 @@ if (!function_exists('bm_archive_norm')) {
                         $parts[] = 'ولی منتشر نشد (پیش‌نویس ماند)';
                     }
                     if (array_key_exists('download', $data) && $data['download'] === false) {
-                        $parts[] = 'دانلود فایل‌ها روی هاست دانلود ناموفق بود';
+                        $parts[] = 'فایل‌ها به هاست دانلود منتقل نشدند' . (!empty($data['download_error']) ? ' (' . (string) $data['download_error'] . ')' : '');
+                        $result['warning'] = 'فایل‌ها به هاست دانلود منتقل نشدند — بعد از رفع مشکل از bot/dl-repair.php دوباره بفرستید';
                     }
                     if ($result['note'] !== '') {
                         $parts[] = $result['note'];

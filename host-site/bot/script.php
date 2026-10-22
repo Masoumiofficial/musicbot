@@ -332,7 +332,9 @@ function bm_curl_post_json($url, array $payload, $timeout = 30) {
     $errno    = curl_errno($ch);
     $code     = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
-    curl_close($ch);
+    if (PHP_VERSION_ID < 80000) {
+        curl_close($ch); // از PHP 8 بی‌اثر و در 8.5 منسوخ است
+    }
 
     return [
         'success'  => ($errno === 0 && $code >= 200 && $code < 300 && !empty($response)),
@@ -381,7 +383,9 @@ function bm_curl_post_form($url, array $payload, $timeout = 120, $userpwd = '') 
     $errno = curl_errno($ch);
     $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
-    curl_close($ch);
+    if (PHP_VERSION_ID < 80000) {
+        curl_close($ch); // از PHP 8 بی‌اثر و در 8.5 منسوخ است
+    }
 
     return [
         'success' => ($errno === 0 && $code >= 200 && $code < 300),
@@ -389,6 +393,68 @@ function bm_curl_post_form($url, array $payload, $timeout = 120, $userpwd = '') 
         'code'    => $code,
         'body'    => $body,
     ];
+}
+
+/**
+ * تفسیر پاسخ هاست دانلود (music.php)
+ * نسخه‌ی ۲ music.php پاسخ JSON می‌دهد: {"ok": bool, "files": [{quality, name, ok, size, http, error, tags}], "error": "..."}
+ * نسخه‌ی قدیمی متن HTML برمی‌گرداند و حتی وقتی فایل دانلود نشده کد 200 می‌دهد؛ این‌جا هر دو را می‌فهمیم.
+ * خروجی: ['ok' => bool, 'summary' => متن گزارش, 'files' => [], 'json' => array|null]
+ */
+function bm_dl_response_info($response) {
+    $info = ['ok' => false, 'summary' => '', 'files' => [], 'json' => null];
+    if (!is_array($response)) {
+        return $info;
+    }
+    $body = isset($response['body']) ? (string) $response['body'] : '';
+    $code = isset($response['code']) ? (int) $response['code'] : 0;
+    $json = json_decode(trim($body), true);
+
+    if (is_array($json) && array_key_exists('ok', $json)) {
+        $info['json']  = $json;
+        $info['ok']    = !empty($json['ok']) && !empty($response['success']);
+        $info['files'] = isset($json['files']) && is_array($json['files']) ? $json['files'] : [];
+        $parts = [];
+        foreach ($info['files'] as $file) {
+            $quality = isset($file['quality']) ? (string) $file['quality'] : '?';
+            if (!empty($file['ok'])) {
+                $parts[] = "[{$quality}] منتقل شد (" . size_format((int) $file['size']) . ')' . (!empty($file['tags']) ? ' — ' . $file['tags'] : '');
+            } else {
+                $parts[] = "[{$quality}] ناموفق: " . (isset($file['error']) ? (string) $file['error'] : 'نامشخص');
+            }
+        }
+        if (empty($parts)) {
+            $parts[] = !empty($json['error']) ? (string) $json['error'] : ('HTTP ' . $code);
+        }
+        if ($code === 401) {
+            $parts[] = 'هاست دانلود یوزر/رمز را نپذیرفت (config.php هر دو هاست باید یکی باشد)';
+        }
+        $info['summary'] = implode(' | ', $parts);
+        return $info;
+    }
+
+    // پاسخ غیر JSON (music.php قدیمی یا صفحه‌ی خطا)
+    $info['ok'] = !empty($response['success']);
+    $text       = mb_substr(trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags($body))), 0, 250);
+    $summary    = 'HTTP ' . $code;
+    if (!empty($response['error'])) {
+        $summary .= ' | ' . $response['error'];
+    }
+    if ($code === 0) {
+        $summary .= ' | اتصال به هاست دانلود برقرار نشد';
+    } elseif ($code === 401) {
+        $summary .= ' | هاست دانلود یوزر/رمز را نپذیرفت (config.php هر دو هاست باید یکی باشد)';
+    }
+    if ($info['ok'] && stripos($body, 'Failed to write tags') !== false) {
+        // music.php قدیمی: دانلود از مبدأ ناموفق بوده و getID3 روی فایل ناموجود خطا داده، ولی کد 200 برگشته
+        $info['ok'] = false;
+        $summary   .= ' | music.php قدیمی: فایل از مبدأ دانلود نشد (music.php نسخه‌ی ۲ را روی هاست دانلود بگذارید تا علت دقیق گزارش شود)';
+    }
+    if ($text !== '') {
+        $summary .= ' | ' . $text;
+    }
+    $info['summary'] = $summary;
+    return $info;
 }
 
 /**
@@ -1318,6 +1384,15 @@ update_post_meta($post_id, '_bm_featured_image_result', maybe_serialize($image_r
  |  13) دانلود موزیک‌ها روی هاست دانلود
  * ------------------------------------------------------ */
 $download_response = null;
+$download_info     = null;
+
+// لینک‌های مبدأ روی پست می‌ماند تا اگر انتقال ناموفق شد، bot/dl-repair.php بدون نیاز دوباره به API آن را تکرار کند
+update_post_meta($post_id, '_bm_media_urls', wp_json_encode([
+    'music320' => $music320,
+    'music128' => $music128,
+    'image'    => $imageUrl,
+    'source'   => $postUrl,
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
 if (!empty($functions_dl_music)) {
     $download_response = bm_curl_post_form($functions_dl_music, [
@@ -1331,9 +1406,15 @@ if (!empty($functions_dl_music)) {
         'file_128'  => $mp3_file_128,
         'dir_file'  => $dl_dir, // مثال: music/m/mohsen-yeganeh
     ], 300, $dl_userpwd);
+    $download_info = bm_dl_response_info($download_response);
 
     // برای بررسی لاگ
     update_post_meta($post_id, '_bm_download_response', maybe_serialize($download_response));
+    if ($download_info['ok']) {
+        delete_post_meta($post_id, '_bm_download_failed');
+    } else {
+        update_post_meta($post_id, '_bm_download_failed', current_time('mysql'));
+    }
 }
 
 /* -------------------------------------------------------
@@ -1341,14 +1422,23 @@ if (!empty($functions_dl_music)) {
  |  تا این‌جا پست پیش‌نویس بود؛ حالا که همه چیز آماده است منتشر می‌شود. این همان اتفاقی است که با
  |  زدن «به‌روزرسانی» در پیشخوان می‌افتد: هوک‌های save_post / publish_post قالب و افزونه‌ها
  |  (کش، پلیر صفحه‌ی اصلی، ارسال تلگرام، نقشه‌ی سایت و ...) پست را کامل می‌بینند.
+ |  اگر فایل‌ها به هاست دانلود نرسیده باشند و $bot_publish_without_files خاموش باشد، پست پیش‌نویس می‌ماند
+ |  (لینک دانلود خراب منتشر نمی‌شود)؛ با bot/dl-repair.php انتقال تکرار و پست منتشر می‌شود.
  * ------------------------------------------------------ */
-$publish_result = wp_update_post([
-    'ID'          => $post_id,
-    'post_status' => 'publish',
-], true);
+$post_published = false;
+$publish_error  = '';
 
-$post_published = !is_wp_error($publish_result) && (int) $publish_result > 0;
-$publish_error  = is_wp_error($publish_result) ? $publish_result->get_error_message() : '';
+if (is_array($download_info) && !$download_info['ok'] && empty($bot_publish_without_files)) {
+    $publish_error = 'فایل‌ها به هاست دانلود منتقل نشدند؛ پست پیش‌نویس ماند (بعد از رفع مشکل از bot/dl-repair.php دوباره بفرستید)';
+} else {
+    $publish_result = wp_update_post([
+        'ID'          => $post_id,
+        'post_status' => 'publish',
+    ], true);
+
+    $post_published = !is_wp_error($publish_result) && (int) $publish_result > 0;
+    $publish_error  = is_wp_error($publish_result) ? $publish_result->get_error_message() : '';
+}
 
 /* -------------------------------------------------------
  |  15) خروجی نهایی
@@ -1387,21 +1477,11 @@ if ($artist_taxonomy === '') {
         . (count($artist_report) > 1 ? '، ' . count($artist_report) . ' هنرمند جدا' : '') . '<br>';
 }
 
-if (is_array($download_response)) {
+if (is_array($download_info)) {
     echo 'پوشه هاست دانلود: ' . esc_html($dl_dir) . '<br>';
-    echo 'دانلود موزیک: ' . ($download_response['success'] ? 'انجام شد' : 'ناموفق') . '<br>';
-    if (!$download_response['success']) {
-        $dl_error = 'HTTP ' . intval($download_response['code']);
-        if (!empty($download_response['error'])) {
-            $dl_error .= ' | ' . $download_response['error'];
-        }
-        if (intval($download_response['code']) === 401) {
-            $dl_error .= ' | هاست دانلود یوزر/رمز را نپذیرفت (config.php هر دو هاست باید یکی باشد)';
-        }
-        if (!empty($download_response['body'])) {
-            $dl_error .= ' | ' . mb_substr(trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags((string) $download_response['body']))), 0, 250);
-        }
-        echo 'خطای دانلود موزیک: ' . esc_html($dl_error) . '<br>';
+    echo 'دانلود موزیک: ' . ($download_info['ok'] ? 'انجام شد' : 'ناموفق') . ($download_info['ok'] && $download_info['summary'] !== '' ? ' — ' . esc_html($download_info['summary']) : '') . '<br>';
+    if (!$download_info['ok']) {
+        echo 'خطای دانلود موزیک: ' . esc_html($download_info['summary']) . '<br>';
     }
 }
 
@@ -1411,6 +1491,7 @@ echo bm_result_marker('ok', [
     'link'      => get_permalink($post_id),
     'title'     => $mytitle,
     'published' => $post_published,
-    'download'  => is_array($download_response) ? (bool) $download_response['success'] : null,
+    'download'  => is_array($download_info) ? (bool) $download_info['ok'] : null,
+    'download_error' => is_array($download_info) && !$download_info['ok'] ? $download_info['summary'] : '',
     'note'      => trim($bm_same_title_note . ($bm_artist_note !== '' ? ($bm_same_title_note !== '' ? '؛ ' : '') . $bm_artist_note : '')),
 ]);

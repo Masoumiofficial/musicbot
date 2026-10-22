@@ -240,3 +240,10 @@ body.modal-open{overflow:hidden}
 .bulk-buttons .bulk-finish{flex:1}
 .bulk-retry{flex:1;height:44px;border:0;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#f97316);color:#fff;margin-top:14px;cursor:pointer;font-size:11px}
 @media(max-width:800px){.dashboard-grid.stats-4{grid-template-columns:1fr 1fr}.list-actions{flex-wrap:wrap}}
+
+/* ثبت شد ولی فایل‌ها به هاست دانلود نرسید (پست پیش‌نویس ماند) */
+.item-status.warn{color:#b45309}
+.music-item.warn{border-color:#f7d9a8;background:#fffaf0}
+.item-action.done.warn{background:#fff4e0;color:#b45309}
+.item-action.done.warn a{color:#b45309}
+.result-message.warn .result-icon{background:#fff4e0;color:#b45309}

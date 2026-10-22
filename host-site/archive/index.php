@@ -61,7 +61,7 @@ window.bmArchive = (function ($) {
     }
 
     function messageBlock(kind, title, small) {
-        const icon = kind === 'ok' ? '✓' : (kind === 'exists' ? '=' : '!');
+        const icon = kind === 'ok' ? '✓' : (kind === 'exists' ? '=' : (kind === 'warn' ? '⚠' : '!'));
         return '<div class="result-message ' + kind + '">' +
             '<span class="result-icon">' + icon + '</span>' +
             '<div><strong>' + esc(title) + '</strong><small>' + esc(small || '') + '</small></div>' +
@@ -72,7 +72,7 @@ window.bmArchive = (function ($) {
         const $result = $(".MTForumBlock");
         let html = '';
         if (res.status === 'ok') {
-            html = messageBlock('ok', 'ثبت شد: ' + (res.title || ''), res.message || '');
+            html = messageBlock(res.warning ? 'warn' : 'ok', (res.warning ? 'ثبت شد ولی فایل‌ها منتقل نشد: ' : 'ثبت شد: ') + (res.title || ''), res.message || '');
             if (res.html) html += '<div class="bot-report">' + res.html + '</div>';
             if (res.link) html += '<div class="result-link"><a href="' + esc(res.link) + '" target="_blank" rel="noopener">مشاهده پست ↗</a></div>';
         } else if (res.status === 'exists') {
@@ -89,13 +89,19 @@ window.bmArchive = (function ($) {
         const $note   = $item.find(".item-note");
         const $action = $item.find(".item-action");
 
-        $item.removeClass("failed");
+        $item.removeClass("failed warn");
         if (res.status === 'ok') {
             $item.removeClass("dup-title").addClass("published just-sent");
-            $status.attr("class", "item-status ok").text("ثبت شد");
+            if (res.warning) {
+                // پست ساخته شد ولی فایل‌ها به هاست دانلود نرسید (پیش‌نویس ماند)؛ ارسال دوباره «تکراری» می‌شود، باید از bot/dl-repair.php رفت
+                $item.addClass("warn");
+                $status.attr("class", "item-status warn").text("ثبت شد — بدون فایل");
+            } else {
+                $status.attr("class", "item-status ok").text("ثبت شد");
+            }
             $note.text(res.message || 'پست ساخته شد.');
-            $action.replaceWith($('<div class="item-action done"></div>')
-                .html(res.link ? '<a href="' + esc(res.link) + '" target="_blank" rel="noopener">✓ ثبت شد ↗</a>' : '✓ ثبت شد'));
+            $action.replaceWith($('<div class="item-action done' + (res.warning ? ' warn' : '') + '"></div>')
+                .html(res.link ? '<a href="' + esc(res.link) + '" target="_blank" rel="noopener">' + (res.warning ? '⚠ بدون فایل' : '✓ ثبت شد') + ' ↗</a>' : (res.warning ? '⚠ بدون فایل' : '✓ ثبت شد')));
         } else if (res.status === 'exists') {
             $item.removeClass("dup-title").addClass("published exists");
             $status.attr("class", "item-status exists").text("قبلاً ثبت شده");
@@ -513,7 +519,7 @@ $(function () {
             ? "ارسال متوقف شد. " + done + " از " + total + " مطلب پردازش شد."
             : "عملیات ارسال همه مطالب به پایان رسید.");
         currentPost.html('<span class="bulk-current-check">✓</span><span>' +
-            counts.ok + ' ثبت شد، ' + counts.exists + ' تکراری، ' + counts.error + ' خطا' +
+            counts.ok + ' ثبت شد' + (counts.warn ? ' (' + counts.warn + ' مورد بدون فایل — پیش‌نویس)' : '') + '، ' + counts.exists + ' تکراری، ' + counts.error + ' خطا' +
             (stopped ? ' (ناتمام)' : '') + '</span>');
         successEl.text(counts.ok);
         existsEl.text(counts.exists);
@@ -549,7 +555,7 @@ $(function () {
         }
 
         openBulkModal(total);
-        const counts = {ok: 0, exists: 0, error: 0};
+        const counts = {ok: 0, exists: 0, error: 0, warn: 0};
         let done = 0;
         let stopped = false;
 
@@ -564,7 +570,10 @@ $(function () {
             bm.showResult(res);
             bm.applyResult($item, res);
 
-            if (res.status === 'ok') counts.ok++;
+            if (res.status === 'ok') {
+                counts.ok++;
+                if (res.warning) { counts.warn++; addFailed(index, title, '⚠ ' + res.warning); }
+            }
             else if (res.status === 'exists') counts.exists++;
             else { counts.error++; addFailed(index, title, res.message); }
 
