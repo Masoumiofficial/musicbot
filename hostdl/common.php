@@ -1,9 +1,13 @@
 <?php
 /**
- * توابع مشترک گیرنده‌های پست‌ساز روی هاست دانلود (video.php ، album.php ، leech.php)
+ * توابع مشترک گیرنده‌های هاست دانلود (music.php ، video.php ، album.php ، leech.php)
  *
  * هر گیرنده اول config.php و auth.php را بارگذاری و bm_require_auth() را اجرا می‌کند، بعد این فایل را.
  * پاسخ همه‌ی گیرنده‌ها JSON است: {"ok": true|false, ...}
+ *
+ * ارسال بسته‌بندی‌شده: اگر فرم با یک فیلد bm_payload (base64url از JSON) رسیده باشد — سایت وقتی WAF این هاست فرم معمولی
+ * را به‌خاطر لینک‌های خارجی رد می‌کند از این قالب استفاده می‌کند — همین‌جا باز و در $_POST گذاشته می‌شود؛
+ * بقیه‌ی گیرنده فرقی نمی‌بیند.
  */
 
 if (!function_exists('bm_require_auth')) {
@@ -14,6 +18,38 @@ if (!function_exists('bm_require_auth')) {
 if (!defined('PZ_BRAND')) {
     define('PZ_BRAND', isset($dl_brand) && $dl_brand !== '' ? (string) $dl_brand : '[ AhangBan.ir ]');
 }
+
+// لوگوی سایت روی کاور داخل فایل‌ها (تنظیمات $dl_watermark_* در config.php)
+require_once __DIR__ . '/watermark.php';
+
+/** آیا فیلدهای این درخواست بسته‌بندی‌شده (bm_payload) رسیده‌اند؟ */
+function pz_payload_was_wrapped() {
+    return !empty($GLOBALS['pz_payload_wrapped']);
+}
+
+/** باز کردن bm_payload در $_POST (یک بار، هنگام بارگذاری این فایل) */
+function pz_unwrap_payload() {
+    $GLOBALS['pz_payload_wrapped'] = false;
+    if (!isset($_POST['bm_payload']) || !is_string($_POST['bm_payload']) || $_POST['bm_payload'] === '') {
+        return;
+    }
+    $raw = strtr($_POST['bm_payload'], '-_', '+/');
+    $raw .= str_repeat('=', (4 - strlen($raw) % 4) % 4);
+    $json = base64_decode($raw, true);
+    $data = $json !== false ? json_decode($json, true) : null;
+    if (!is_array($data)) {
+        return;
+    }
+    // همان تبدیلی که PHP برای فرم معمولی انجام می‌دهد (کلیدهای a[b] به آرایه‌ی تو در تو)
+    parse_str(http_build_query($data, '', '&'), $parsed);
+    foreach ($parsed as $key => $value) {
+        $_POST[$key] = $value;
+    }
+    unset($_POST['bm_payload'], $_POST['bm_payload_v']);
+    $_REQUEST = array_merge($_GET, $_POST);
+    $GLOBALS['pz_payload_wrapped'] = true;
+}
+pz_unwrap_payload();
 
 /** آماده‌سازی اجرا برای انتقال‌های طولانی */
 function pz_prepare_runtime() {
@@ -94,14 +130,28 @@ function pz_abs_dir($relative) {
     return $path;
 }
 
+/** User-Agent مرورگر برای دانلود از سایت‌های مبدأ (بعضی CDNها درخواست بدون UA یا با UA ناشناس را 403 می‌کنند) */
+function pz_browser_user_agent() {
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+}
+
 /**
  * دانلود یک URL در مسیر مقصد (استریم؛ کل فایل در حافظه نمی‌آید)
+ * $opts: user_agent (پیش‌فرض: UA مرورگر)، referer (پیش‌فرض: ریشه‌ی همان دامنه)، timeout (ثانیه)
  * خروجی: ['ok' => bool, 'size' => int, 'error' => string, 'http' => int]
  */
-function pz_download($url, $destination) {
+function pz_download($url, $destination, array $opts = []) {
     if (!pz_valid_url($url)) {
         return ['ok' => false, 'size' => 0, 'error' => 'invalid url', 'http' => 0];
     }
+
+    $user_agent = isset($opts['user_agent']) && $opts['user_agent'] !== '' ? (string) $opts['user_agent'] : pz_browser_user_agent();
+    $referer    = isset($opts['referer']) ? (string) $opts['referer'] : '';
+    if ($referer === '') {
+        $host    = (string) parse_url($url, PHP_URL_HOST);
+        $referer = $host !== '' ? ((string) parse_url($url, PHP_URL_SCHEME) ?: 'https') . '://' . $host . '/' : '';
+    }
+    $timeout = isset($opts['timeout']) ? max(10, (int) $opts['timeout']) : 1800;
 
     $handle = @fopen($destination, 'wb');
     if (!$handle) {
@@ -118,16 +168,19 @@ function pz_download($url, $destination) {
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS      => 5,
             CURLOPT_CONNECTTIMEOUT => 30,
-            CURLOPT_TIMEOUT        => 1800,
+            CURLOPT_TIMEOUT        => $timeout,
             CURLOPT_FAILONERROR    => true,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,
-            CURLOPT_USERAGENT      => 'AhangBan-DL/1.0',
+            CURLOPT_USERAGENT      => $user_agent,
+            CURLOPT_REFERER        => $referer,
+            CURLOPT_HTTPHEADER     => ['Accept: */*', 'Accept-Language: fa,en;q=0.8'],
             CURLOPT_PROTOCOLS      => CURLPROTO_HTTP | CURLPROTO_HTTPS,
             CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
         ]);
         $done  = curl_exec($ch);
         $error = curl_error($ch);
+        $errno = curl_errno($ch);
         $http  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if (PHP_VERSION_ID < 80000) {
             curl_close($ch);
@@ -136,12 +189,20 @@ function pz_download($url, $destination) {
         fclose($handle);
         if ($done === false) {
             @unlink($destination);
-            return ['ok' => false, 'size' => 0, 'error' => $error !== '' ? $error : ('HTTP ' . $http), 'http' => $http];
+            $why = $error !== '' ? $error : ('HTTP ' . $http);
+            if ($errno === 22 || ($http >= 400 && $error === '')) {
+                $why = 'HTTP ' . $http . ' از سرور مبدأ' . ($http === 403 ? ' (دسترسی این سرور به فایل مسدود شده)' : ($http === 404 ? ' (فایل در مبدأ نیست)' : ''));
+            } elseif ($errno === 28) {
+                $why = 'زمان انتظار تمام شد (' . $error . ')';
+            } elseif ($errno === 6 || $errno === 7) {
+                $why = 'اتصال به سرور مبدأ برقرار نشد (' . $error . ')';
+            }
+            return ['ok' => false, 'size' => 0, 'error' => $why, 'http' => $http, 'errno' => $errno];
         }
     } else {
         // بدون cURL: جریان http (با ignore_errors خاموش، پاسخ 4xx/5xx باز نمی‌شود)
         $context = stream_context_create([
-            'http' => ['timeout' => 1800, 'follow_location' => 1, 'max_redirects' => 5, 'user_agent' => 'AhangBan-DL/1.0'],
+            'http' => ['timeout' => $timeout, 'follow_location' => 1, 'max_redirects' => 5, 'user_agent' => $user_agent, 'header' => ($referer !== '' ? "Referer: {$referer}\r\n" : '')],
             'ssl'  => ['verify_peer' => false, 'verify_peer_name' => false],
         ]);
         $source = @fopen($url, 'rb', false, $context);
@@ -199,8 +260,8 @@ function pz_sniff($path) {
  * دانلود + بررسی نوع فایل؛ اگر محتوا با نوع موردانتظار نخواند (مثلاً صفحه‌ی HTML خطا) فایل پاک می‌شود
  * $kinds: audio | video | image
  */
-function pz_download_checked($url, $destination, array $kinds) {
-    $result = pz_download($url, $destination);
+function pz_download_checked($url, $destination, array $kinds, array $opts = []) {
+    $result = pz_download($url, $destination, $opts);
     if (!$result['ok']) {
         return $result;
     }
@@ -227,9 +288,38 @@ function pz_download_checked($url, $destination, array $kinds) {
 }
 
 /**
+ * آماده‌سازی کاور برای تگ‌نویسی: اگر در config.php فعال باشد، لوگوی سایت یک بار روی همان فایل کاور می‌نشیند
+ * (هر مسیر فقط یک بار در هر اجرا؛ آلبوم با ۳۰ قطعه هم یک بار پردازش می‌شود)
+ * خروجی: ['path' => مسیر کاور, 'watermark' => null | ['ok' => bool, 'note' => متن فارسی, 'logo_width' => int, 'variant' => string]]
+ */
+function pz_cover_prepare($cover) {
+    static $done = [];
+    $cover = (string) $cover;
+    $out   = ['path' => $cover, 'watermark' => null];
+    if ($cover === '' || !is_readable($cover)) {
+        return $out;
+    }
+    if (isset($done[$cover])) {
+        return $done[$cover];
+    }
+    $opts = bm_wm_options_from_globals('dl');
+    if (!empty($opts['enabled'])) {
+        $result           = bm_wm_apply($cover, $cover, $opts);
+        $out['watermark'] = [
+            'ok'         => !empty($result['ok']) && empty($result['skipped']),
+            'note'       => bm_wm_describe($result),
+            'logo_width' => isset($result['logo_width']) ? (int) $result['logo_width'] : 0,
+            'variant'    => isset($result['variant']) ? (string) $result['variant'] : '',
+        ];
+    }
+    $done[$cover] = $out;
+    return $out;
+}
+
+/**
  * نوشتن تگ ID3v2.3 با getID3 (همان قالب music.php)
- * $tags: title, artist, album, track, year, cover (مسیر فایل تصویر)
- * خروجی: ['ok' => bool, 'warnings' => [], 'errors' => []]
+ * $tags: title, artist, album, track, year, cover (مسیر فایل تصویر؛ اگر واترمارک فعال باشد اول لوگو روی آن می‌نشیند)
+ * خروجی: ['ok' => bool, 'warnings' => [], 'errors' => [], 'watermark' => خروجی pz_cover_prepare یا null]
  */
 function pz_write_mp3_tags($path, array $tags) {
     require_once __DIR__ . '/getid3/getid3.php';
@@ -267,7 +357,9 @@ function pz_write_mp3_tags($path, array $tags) {
         'unique_file_identifier' => ['ownerid' => PZ_BRAND, 'data' => md5($path . microtime(true))],
     ];
 
-    $cover = isset($tags['cover']) ? (string) $tags['cover'] : '';
+    $cover     = isset($tags['cover']) ? (string) $tags['cover'] : '';
+    $prepared  = pz_cover_prepare($cover);
+    $cover     = $prepared['path'];
     if ($cover !== '' && is_readable($cover)) {
         $image = @file_get_contents($cover);
         $mime  = pz_sniff($cover);
@@ -286,9 +378,10 @@ function pz_write_mp3_tags($path, array $tags) {
     $written          = $writer->WriteTags();
 
     return [
-        'ok'       => (bool) $written,
-        'warnings' => array_map('strval', (array) $writer->warnings),
-        'errors'   => array_map('strval', (array) $writer->errors),
+        'ok'        => (bool) $written,
+        'warnings'  => array_map('strval', (array) $writer->warnings),
+        'errors'    => array_map('strval', (array) $writer->errors),
+        'watermark' => $prepared['watermark'],
     ];
 }
 

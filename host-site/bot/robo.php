@@ -25,6 +25,10 @@ if ($done_link !== '' && !filter_var($done_link, FILTER_VALIDATE_URL)) {
         <form action="https://ahangban.ir/bot/manual.php" method="post">
             <label for="link">: لینک پست </label>
             <input type="url" id="link" name="link" placeholder="https://example.com" required>
+            <label for="same_title" style="display:flex;align-items:center;gap:8px;font-size:13px;margin:8px 0;cursor:pointer">
+                <input type="checkbox" id="same_title" name="same_title" value="1" style="width:auto;margin:0">
+                اگر پستی با همین عنوان بود (قطعه‌ی دیگری با همین نام)، با شماره ثبت شود — مثل «ساز و آواز (2)»
+            </label>
             <button type="submit">ارسال</button>
         </form>
     </div>
