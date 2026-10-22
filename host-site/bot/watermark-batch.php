@@ -4,7 +4,7 @@
  *
  *   /bot/watermark-batch.php                      وضعیت: فایل لوگو، تنظیمات، شمار کاورها، پیش‌نمایش چند کاور اخیر (اصلی / با لوگو)
  *   /bot/watermark-batch.php?preview=ID           تصویر پیش‌نمایش برای یک پست (یا اتچمنت) با تنظیمات فعلی — چیزی ذخیره نمی‌شود
- *   /bot/watermark-batch.php?width=18&opacity=90&position=bottom-left&margin=4&shadow=1&plate=square&plate_color=auto&plate_size=13&plate_radius=10&plate_opacity=100
+ *   /bot/watermark-batch.php?width=18&opacity=90&position=bottom-left&margin=4&shadow=1&plate=square&plate_color=auto&plate_size=13&plate_radius=10&plate_style=glass&plate_opacity=72
  *                                                 آزمایش تنظیمات دیگر در پیش‌نمایش بدون دست زدن به config.php
  *   دکمه‌ی «شروع / ادامه»                         پست‌ها از جدیدترین به قدیمی‌ترین، دسته‌دسته: نسخه‌ی اصلی کاور کنار فایل نگه داشته می‌شود
  *                                                 (…-bm-original.jpg)، لوگو روی کاور اصلی می‌نشیند و همه‌ی سایزهای بندانگشتی دوباره ساخته
@@ -59,6 +59,7 @@ function wmb_override_keys() {
         'plate_size'   => 'plate_size',
         'plate_radius' => 'plate_radius',
         'plate_opacity' => 'plate_opacity',
+        'plate_style'  => 'plate_style',
     ];
 }
 
@@ -67,7 +68,7 @@ function wmb_options(array $overrides = []) {
     $opts = bm_wm_options_from_globals('bot');
     foreach (wmb_override_keys() as $param => $key) {
         if (isset($overrides[$param]) && $overrides[$param] !== '') {
-            $opts[$key] = in_array($key, ['position', 'plate', 'plate_color'], true) ? (string) $overrides[$param] : (float) $overrides[$param];
+            $opts[$key] = in_array($key, ['position', 'plate', 'plate_color', 'plate_style'], true) ? (string) $overrides[$param] : (float) $overrides[$param];
         }
     }
     return bm_wm_normalize_options($opts);
@@ -219,6 +220,7 @@ function wmb_process($attachment_id, array $opts, $stamp, $keep_original) {
         'variant'    => (string) $result['variant'],
         'position'   => (string) $result['position'],
         'plate'      => isset($result['plate']) ? (string) $result['plate'] : '',
+        'plate_style' => isset($result['plate_style']) ? (string) $result['plate_style'] : '',
         'plate_color' => isset($result['plate_color']) ? (string) $result['plate_color'] : '',
         'by'         => 'batch',
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
@@ -577,7 +579,7 @@ img.thumb{width:48px;height:48px;object-fit:cover;border-radius:6px}
         $wmb_plate_names = ['auto' => 'خودکار (مربع/مستطیل)', 'square' => 'مربع', 'rect' => 'مستطیل'];
         echo $wmb_cfg_opts['plate'] === 'none'
             ? 'ندارد (لوگوی آزاد)'
-            : wmb_h(($wmb_plate_names[$wmb_cfg_opts['plate']] ?? $wmb_cfg_opts['plate']) . '، رنگ ' . ($wmb_cfg_opts['plate_color'] === 'auto' ? 'غالبِ هر کاور' : 'ثابت ' . $wmb_cfg_opts['plate_color']) . '، ضلع ' . $wmb_cfg_opts['plate_size'] . '٪ عرض، گردی گوشه ' . $wmb_cfg_opts['plate_radius'] . '٪، شفافیت پلاک ' . $wmb_cfg_opts['plate_opacity'] . '٪');
+            : wmb_h(($wmb_plate_names[$wmb_cfg_opts['plate']] ?? $wmb_cfg_opts['plate']) . ($wmb_cfg_opts['plate_style'] === 'glass' ? ' شیشه‌ای' : ' پر') . '، رنگ ' . ($wmb_cfg_opts['plate_color'] === 'auto' ? 'غالبِ هر کاور' : 'ثابت ' . $wmb_cfg_opts['plate_color']) . '، ضلع ' . $wmb_cfg_opts['plate_size'] . '٪ عرض، گردی گوشه ' . $wmb_cfg_opts['plate_radius'] . '٪، پُری ' . $wmb_cfg_opts['plate_opacity'] . '٪');
       ?> |
       کاور کوچک‌تر از <?php echo (int) $wmb_cfg_opts['min_cover']; ?>px بدون لوگو |
       شناسه‌ی واترمارک: <code><?php echo wmb_h($wmb_stamp); ?></code>
@@ -609,7 +611,13 @@ img.thumb{width:48px;height:48px;object-fit:cover;border-radius:6px}
     <label>رنگ پلاک <input type="text" name="plate_color" value="<?php echo wmb_h($wmb_opts['plate_color']); ?>" style="width:90px;direction:ltr" placeholder="auto یا #1e1e1e"></label>
     <label>ضلع پلاک ٪ <input type="number" name="plate_size" min="5" max="50" step="0.5" value="<?php echo wmb_h($wmb_opts['plate_size']); ?>" style="width:70px"></label>
     <label>گردی ٪ <input type="number" name="plate_radius" min="0" max="50" step="1" value="<?php echo wmb_h($wmb_opts['plate_radius']); ?>" style="width:70px"></label>
-    <label>شفافیت پلاک ٪ <input type="number" name="plate_opacity" min="10" max="100" step="5" value="<?php echo wmb_h($wmb_opts['plate_opacity']); ?>" style="width:70px" title="100 = کاملاً پر؛ کمتر = کاور از پشت پلاک دیده می‌شود"></label>
+    <label>جنس پلاک
+      <select name="plate_style">
+        <option value="glass"<?php echo $wmb_opts['plate_style'] === 'glass' ? ' selected' : ''; ?>>شیشه‌ای (تار + لبه‌ی روشن)</option>
+        <option value="solid"<?php echo $wmb_opts['plate_style'] === 'solid' ? ' selected' : ''; ?>>پر و ساده</option>
+      </select>
+    </label>
+    <label>پُری پلاک ٪ <input type="number" name="plate_opacity" min="10" max="100" step="5" value="<?php echo wmb_h($wmb_opts['plate_opacity']); ?>" style="width:70px" title="100 = کاملاً پر؛ کمتر = کاور از پشت پلاک دیده می‌شود (شیشه‌ای: تار)"></label>
     <button type="submit" class="gray">پیش‌نمایش با این مقادیر</button>
     <?php if ($wmb_overrides !== []) : ?><span class="warn">مقادیر آزمایشی — اجرای دسته‌ای فقط با مقادیر config.php انجام می‌شود؛ اگر این‌ها را پسندیدید در config.php بگذارید</span><?php endif; ?>
   </form>

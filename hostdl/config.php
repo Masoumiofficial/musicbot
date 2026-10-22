@@ -31,4 +31,5 @@ $dl_watermark_plate         = 'auto';   // auto | square | rect | none
 $dl_watermark_plate_color   = 'auto';   // auto | '#1e1e1e'
 $dl_watermark_plate_size    = 14;       // ضلع پلاک مربع، درصد عرض کاور
 $dl_watermark_plate_radius  = 10;
-$dl_watermark_plate_opacity = 100;      // پُری پلاک، درصد (100 = کاملاً پر، حداقل 10)
+$dl_watermark_plate_style   = 'glass';  // glass = شیشه‌ای (پشت پلاک تار + لبه‌ی روشن) | solid = پر و ساده
+$dl_watermark_plate_opacity = 72;       // پُری پلاک، درصد (100 = کاملاً پر، حداقل 10)

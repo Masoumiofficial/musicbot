@@ -14,6 +14,8 @@
  * چه می‌کند:
  *   - پیش‌فرض (plate = auto): پشت لوگو یک پلاک مربع/مستطیل با گوشه‌ی گرد می‌گذارد که رنگش رنگ غالبِ پررنگ همان کاور است
  *     (سبک مربع لوگوی رادیوجوان)؛ لوگوی سفید وسط پلاک. کاور سیاه‌وسفید → پلاک خاکستری تیره. plate_color می‌تواند رنگ ثابت باشد
+ *   - plate_style = glass (پیش‌فرض): پلاک شیشه‌ای — کاورِ زیر پلاک تار می‌شود، رنگ پلاک با شفافیت plate_opacity رویش می‌نشیند
+ *     و یک لبه/درخشش روشن ملایم می‌گیرد؛ plate_style = solid: پلاک پر و ساده (plate_opacity = 100 در هر دو حالت یعنی کاملاً پر)
  *   - plate = none: لوگوی PNG شفاف را با عرضی نسبی (درصدی از عرض کاور) در گوشه‌ی انتخابی می‌نشاند؛ حاشیه‌ی شفاف دور لوگو خودکار حذف می‌شود
  *   - روشنایی همان گوشه‌ی کاور را می‌سنجد؛ اگر روشن بود و نسخه‌ی تیره‌ی لوگو داده شده باشد از آن استفاده می‌کند،
  *     وگرنه سایه‌ی زیر لوگو را کمی پررنگ‌تر می‌کند تا لوگوی سفید خوانا بماند
@@ -47,7 +49,8 @@ if (!function_exists('bm_wm_defaults')) {
             'plate_color'     => 'auto',        // auto = رنگ غالبِ پررنگ همان کاور؛ یا رنگ ثابت مثل '#1e1e1e'
             'plate_size'      => 13,            // ضلع پلاک مربع، درصد عرض کاور (پلاک مستطیل از عرض لوگو + حاشیه ساخته می‌شود)
             'plate_radius'    => 10,            // گردی گوشه‌ها، درصد ضلع کوچک‌تر پلاک (0 = تیز، 50 = کاملاً گرد)
-            'plate_opacity'   => 100,           // درصد
+            'plate_style'     => 'glass',       // glass = شیشه‌ای (پشت پلاک تار + لبه‌ی روشن) | solid = پر و ساده
+            'plate_opacity'   => 72,            // پُری پلاک، درصد: 100 = کاملاً پر؛ کمتر = کاور (تار) از پشت دیده می‌شود
             'plate_padding'   => 18,            // فاصله‌ی لوگو تا لبه‌ی پلاک مربع، درصد ضلع
         ];
     }
@@ -78,6 +81,7 @@ if (!function_exists('bm_wm_defaults')) {
             'plate_size'    => 'plate_size',
             'plate_radius'  => 'plate_radius',
             'plate_opacity' => 'plate_opacity',
+            'plate_style'   => 'plate_style',
         ];
         foreach ($map as $suffix => $key) {
             if (array_key_exists($base . '_' . $suffix, $GLOBALS)) {
@@ -116,6 +120,8 @@ if (!function_exists('bm_wm_defaults')) {
         $o['plate_radius']    = min(50, max(0, (float) $o['plate_radius']));
         $o['plate_opacity']   = min(100, max(10, (int) $o['plate_opacity']));
         $o['plate_padding']   = min(40, max(5, (float) $o['plate_padding']));
+        $plate_style          = strtolower(trim((string) $o['plate_style']));
+        $o['plate_style']     = in_array($plate_style, ['solid', 'flat', 'plain'], true) ? 'solid' : 'glass';
         return $o;
     }
 
@@ -237,6 +243,7 @@ if (!function_exists('bm_wm_defaults')) {
             (string) $o['plate_radius'],
             (string) $o['plate_opacity'],
             (string) $o['plate_padding'],
+            $o['plate_style'],
         ];
         return substr(md5(implode('|', $parts)), 0, 12);
     }
@@ -701,6 +708,7 @@ if (!function_exists('bm_wm_defaults')) {
 
         $factor   = min(100, max(10, (int) $opacity)) / 100;
         $coverage = array_fill(0, $w * $h, 0.0);
+        $shape    = $coverage;
         for ($y = 0; $y < $h; $y++) {
             for ($x = 0; $x < $w; $x++) {
                 $c       = imagecolorat($layer, $x, $y);
@@ -708,6 +716,7 @@ if (!function_exists('bm_wm_defaults')) {
                 if ($visible <= 0) {
                     continue;
                 }
+                $shape[$y * $w + $x] = $visible / 127;
                 if ($factor < 1) {
                     $visible = (int) round($visible * $factor);
                     imagesetpixel($layer, $x, $y, ((127 - $visible) << 24) | ($c & 0xFFFFFF));
@@ -715,7 +724,84 @@ if (!function_exists('bm_wm_defaults')) {
                 $coverage[$y * $w + $x] = $visible / 127;
             }
         }
-        return ['img' => $layer, 'w' => $w, 'h' => $h, 'coverage' => $coverage];
+        return ['img' => $layer, 'w' => $w, 'h' => $h, 'coverage' => $coverage, 'shape' => $shape];
+    }
+
+    /**
+     * لایه‌های پلاک شیشه‌ای:
+     *   backdrop = همان تکه‌ی کاور زیر پلاک، تارشده و بریده به شکل پلاک (زیر رنگ پلاک می‌نشیند)
+     *   gloss    = لبه‌ی روشن نازک + درخشش ملایم بالای پلاک (روی رنگ پلاک، زیر لوگو)
+     * $plate خروجی bm_wm_plate_layer است (برای شکل گوشه‌گرد)؛ $x,$y جای پلاک روی کاور
+     */
+    function bm_wm_glass_layers($cover, $x, $y, array $plate, $radius) {
+        $w  = $plate['w'];
+        $h  = $plate['h'];
+        $cw = imagesx($cover);
+        $ch = imagesy($cover);
+
+        // --- تار کردن ناحیه‌ی زیر پلاک (با حاشیه تا لبه‌ها تیره/کدر نشوند) ---
+        $blur = max(3.0, min($w, $h) * 0.09);
+        $pad  = (int) ceil($blur * 2);
+        $x0   = max(0, $x - $pad);
+        $y0   = max(0, $y - $pad);
+        $x1   = min($cw, $x + $w + $pad);
+        $y1   = min($ch, $y + $h + $pad);
+        $rw   = max(1, $x1 - $x0);
+        $rh   = max(1, $y1 - $y0);
+        $region = imagecreatetruecolor($rw, $rh);
+        imagecopy($region, $cover, 0, 0, $x0, $y0, $rw, $rh);
+        $sw    = max(1, (int) round($rw / $blur));
+        $sh    = max(1, (int) round($rh / $blur));
+        $small = imagecreatetruecolor($sw, $sh);
+        imagecopyresampled($small, $region, 0, 0, 0, 0, $sw, $sh, $rw, $rh);
+        if (function_exists('imagefilter') && defined('IMG_FILTER_GAUSSIAN_BLUR')) {
+            imagefilter($small, IMG_FILTER_GAUSSIAN_BLUR);
+            imagefilter($small, IMG_FILTER_GAUSSIAN_BLUR);
+        }
+        imagecopyresampled($region, $small, 0, 0, 0, 0, $rw, $rh, $sw, $sh);
+        bm_wm_free($small);
+
+        $backdrop = imagecreatetruecolor($w, $h);
+        imagealphablending($backdrop, false);
+        imagesavealpha($backdrop, true);
+        imagefill($backdrop, 0, 0, 0x7F000000);
+        $gloss = imagecreatetruecolor($w, $h);
+        imagealphablending($gloss, false);
+        imagesavealpha($gloss, true);
+        imagefill($gloss, 0, 0, 0x7F000000);
+
+        // شکل داخلی (کمی کوچک‌تر) برای به‌دست‌آوردن نوار لبه
+        $inset = max(1, (int) round(min($w, $h) * 0.014));
+        $inner = bm_wm_plate_layer(max(2, $w - 2 * $inset), max(2, $h - 2 * $inset), max(0, $radius - $inset), [255, 255, 255], 100);
+        $iw    = $inner['w'];
+        $ih    = $inner['h'];
+        bm_wm_free($inner['img']);
+
+        $ox = $x - $x0;
+        $oy = $y - $y0;
+        for ($py = 0; $py < $h; $py++) {
+            $t = $py / max(1, $h - 1);                                   // ۰ بالا … ۱ پایین
+            $edge_strength = 0.42 - 0.27 * $t;                           // لبه: بالا روشن‌تر
+            $sheen = $t < 0.45 ? 0.11 * (1 - $t / 0.45) : 0.0;           // درخشش ملایم نیمه‌ی بالایی
+            for ($px = 0; $px < $w; $px++) {
+                $cov = $plate['shape'][$py * $w + $px];
+                if ($cov <= 0) {
+                    continue;
+                }
+                $c = imagecolorat($region, min($rw - 1, $ox + $px), min($rh - 1, $oy + $py)) & 0xFFFFFF;
+                imagesetpixel($backdrop, $px, $py, ((127 - (int) round($cov * 127)) << 24) | $c);
+
+                $ix = $px - $inset;
+                $iy = $py - $inset;
+                $in = ($ix >= 0 && $iy >= 0 && $ix < $iw && $iy < $ih) ? $inner['shape'][$iy * $iw + $ix] : 0.0;
+                $a  = max(0.0, $cov - $in) * $edge_strength + $in * $sheen;
+                if ($a > 0.004) {
+                    imagesetpixel($gloss, $px, $py, ((127 - (int) round(min(1.0, $a) * 127)) << 24) | 0xFFFFFF);
+                }
+            }
+        }
+        bm_wm_free($region);
+        return ['backdrop' => $backdrop, 'gloss' => $gloss];
     }
 
     /**
@@ -724,7 +810,7 @@ if (!function_exists('bm_wm_defaults')) {
      * خروجی: [
      *   'ok' => bool, 'skipped' => bool, 'reason' => small, 'error' => gd|logo_missing|logo_not_image|logo_not_transparent|cover|write|disabled,
      *   'width', 'height' (کاور)، 'logo_width', 'logo_height', 'x', 'y', 'variant' => light|dark, 'luminance', 'position', 'format', 'stamp',
-     *   'plate' => ''|square|rect, 'plate_color' => '#rrggbb', 'plate_width', 'plate_height'
+     *   'plate' => ''|square|rect, 'plate_style' => glass|solid, 'plate_color' => '#rrggbb', 'plate_width', 'plate_height'
      * ]
      * وقتی skipped = true فایلی نوشته نمی‌شود.
      */
@@ -734,7 +820,7 @@ if (!function_exists('bm_wm_defaults')) {
             'ok' => false, 'skipped' => false, 'reason' => '', 'error' => '', 'detail' => '',
             'width' => 0, 'height' => 0, 'logo_width' => 0, 'logo_height' => 0, 'x' => 0, 'y' => 0,
             'variant' => '', 'luminance' => null, 'position' => $o['position'], 'format' => '', 'stamp' => '',
-            'logo' => $o['logo'], 'plate' => '', 'plate_color' => '', 'plate_width' => 0, 'plate_height' => 0,
+            'logo' => $o['logo'], 'plate' => '', 'plate_style' => '', 'plate_color' => '', 'plate_width' => 0, 'plate_height' => 0,
         ];
 
         if (!bm_wm_available()) {
@@ -863,11 +949,12 @@ if (!function_exists('bm_wm_defaults')) {
 
             $radius = min($pw, $ph) * $o['plate_radius'] / 100;
             $plate  = bm_wm_plate_layer($pw, $ph, $radius, $plate_rgb, $o['plate_opacity']);
-            imagealphablending($plate['img'], true);
-            imagecopy($plate['img'], $logo_layer['img'], (int) round(($pw - $lw) / 2), (int) round(($ph - $lh) / 2), 0, 0, $logo_layer['w'], $logo_layer['h']);
 
             list($x, $y) = $place($pw, $ph);
             $luminance   = bm_wm_region_luminance($cover, $x - (int) ($margin / 2), $y - (int) ($margin / 2), $pw + $margin, $ph + $margin);
+
+            // شیشه‌ای: کاور زیر پلاک تار می‌شود و لبه/درخشش روشن می‌گیرد (با پُری ۱۰۰ تفاوتی با پلاک پر ندارد)
+            $glass = ($o['plate_style'] === 'glass' && $o['plate_opacity'] < 100) ? bm_wm_glass_layers($cover, $x, $y, $plate, $radius) : null;
 
             $canvas = imagecreatetruecolor($width, $height);
             imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
@@ -879,10 +966,20 @@ if (!function_exists('bm_wm_defaults')) {
                 $shadow = bm_wm_shadow_layer('plate|' . $pw . 'x' . $ph . '|' . round($radius, 1) . '|' . $o['plate_opacity'], $plate, 0.22, false);
                 imagecopy($canvas, $shadow['img'], $x - $shadow['pad'], $y - $shadow['pad'] + $shadow['dy'], 0, 0, $shadow['w'], $shadow['h']);
             }
+            if ($glass) {
+                imagecopy($canvas, $glass['backdrop'], $x, $y, 0, 0, $pw, $ph);
+            }
             imagecopy($canvas, $plate['img'], $x, $y, 0, 0, $pw, $ph);
             bm_wm_free($plate['img']);
+            if ($glass) {
+                imagecopy($canvas, $glass['gloss'], $x, $y, 0, 0, $pw, $ph);
+                bm_wm_free($glass['backdrop']);
+                bm_wm_free($glass['gloss']);
+            }
+            imagecopy($canvas, $logo_layer['img'], $x + (int) round(($pw - $lw) / 2), $y + (int) round(($ph - $lh) / 2), 0, 0, $logo_layer['w'], $logo_layer['h']);
 
             $result['plate']        = $shape;
+            $result['plate_style']  = $glass ? 'glass' : 'solid';
             $result['plate_color']  = bm_wm_rgb_to_hex($plate_rgb);
             $result['plate_width']  = $pw;
             $result['plate_height'] = $ph;
@@ -963,7 +1060,7 @@ if (!function_exists('bm_wm_defaults')) {
         }
         if (!empty($result['ok']) && empty($result['skipped'])) {
             if (!empty($result['plate'])) {
-                return 'لوگو نشست (پلاک ' . ($result['plate'] === 'square' ? 'مربع ' : 'مستطیل ') . (int) $result['plate_width'] . 'px به رنگ '
+                return 'لوگو نشست (پلاک ' . (isset($result['plate_style']) && $result['plate_style'] === 'glass' ? 'شیشه‌ای ' : '') . ($result['plate'] === 'square' ? 'مربع ' : 'مستطیل ') . (int) $result['plate_width'] . 'px به رنگ '
                     . $result['plate_color'] . '، ' . bm_wm_position_label($result['position'])
                     . ($result['variant'] === 'dark' ? '، لوگوی تیره روی پلاک روشن' : '') . ')';
             }

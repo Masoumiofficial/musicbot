@@ -11,5 +11,6 @@ logo-dark.png  اختیاری: همان لوگو به رنگ تیره؛ وقتی
 
 تنظیمات (جای لوگو، اندازه، شفافیت، سایه، پلاک و رنگ آن): host-site/bot/config.php → $bot_watermark_*
 بدون پلاک (لوگوی آزاد با سایه مثل قبل): $bot_watermark_plate = 'none'؛ رنگ ثابت: $bot_watermark_plate_color = '#1e1e1e'
+پلاک شیشه‌ای (پیش‌فرض): $bot_watermark_plate_style = 'glass' + $bot_watermark_plate_opacity = 72؛ پلاک پر: 'solid' یا پُری 100
 پیش‌نمایش و اجرای دسته‌ای روی کاورهای قدیمی: https://ahangban.ir/bot/watermark-batch.php
 همین دو فایل را در hostdl/assets/ روی هاست دانلود هم بگذارید (کاور داخل فایل‌های MP3).
