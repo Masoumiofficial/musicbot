@@ -7,6 +7,8 @@ global $wpdb;
 
 // توابع احراز هویت (برای ارسال یوزر/رمز به هاست دانلود)؛ خودِ بررسی ورود در manual.php / auto.php انجام می‌شود
 require_once __DIR__ . '/auth.php';
+// لوگوی سایت روی کاور (تنظیمات $bot_watermark_* در config.php)
+require_once __DIR__ . '/watermark.php';
 
 $dir_wp = date('Y/m');
 
@@ -534,6 +536,11 @@ function bm_dl_response_info($response) {
         if (empty($parts)) {
             $parts[] = !empty($json['error']) ? (string) $json['error'] : ('HTTP ' . $code);
         }
+        // کاور داخل فایل‌ها (music.php نسخه‌ی ۳ نتیجه‌ی لوگو را در cover.watermark می‌فرستد)
+        if (!empty($json['cover']['watermark']) && is_array($json['cover']['watermark'])) {
+            $wm      = $json['cover']['watermark'];
+            $parts[] = 'کاور داخل فایل: ' . (isset($wm['note']) && $wm['note'] !== '' ? (string) $wm['note'] : (!empty($wm['ok']) ? 'لوگو نشست' : 'لوگو ننشست'));
+        }
         if ($code === 401) {
             $parts[] = 'هاست دانلود یوزر/رمز را نپذیرفت (config.php هر دو هاست باید یکی باشد)';
         }
@@ -590,6 +597,40 @@ function bm_set_term_if_not_empty($post_id, $value, $taxonomy, $append = false) 
     }
 
     wp_set_object_terms($post_id, $value, $taxonomy, $append);
+}
+
+/**
+ * لوگوی سایت روی فایل کاور، قبل از ثبت به‌عنوان تصویر شاخص (bot/watermark.php؛ تنظیمات $bot_watermark_* در config.php)
+ * فایل خروجی کنار فایل ورودی با پسوند .wm.{ext} ساخته و فایل ورودی پاک می‌شود؛ اگر لوگو ننشست (غیرفعال، فایل لوگو نبود،
+ * کاور کوچک بود …) همان فایل ورودی می‌ماند و فقط در note گزارش می‌شود.
+ * خروجی: ['applied' => bool, 'path' => مسیر فایل نهایی, 'note' => متن فارسی برای گزارش, 'result' => خروجی bm_wm_apply یا null, 'stamp' => شناسه‌ی واترمارک]
+ */
+function bm_watermark_cover_file($path, $ext = 'jpg') {
+    $out  = ['applied' => false, 'path' => $path, 'note' => '', 'result' => null, 'stamp' => ''];
+    $opts = bm_wm_options_from_globals('bot');
+    if (empty($opts['enabled'])) {
+        return $out;
+    }
+    $ext = strtolower(preg_replace('/[^a-z0-9]/i', '', (string) $ext));
+    if ($ext === '') {
+        $ext = 'jpg';
+    }
+    if (function_exists('wp_raise_memory_limit')) {
+        wp_raise_memory_limit('image');
+    }
+    $target        = $path . '.wm.' . $ext;
+    $result        = bm_wm_apply($path, $target, $opts);
+    $out['result'] = $result;
+    $out['note']   = bm_wm_describe($result);
+    if (!empty($result['ok']) && empty($result['skipped']) && file_exists($target) && filesize($target) > 0) {
+        @unlink($path);
+        $out['path']    = $target;
+        $out['applied'] = true;
+        $out['stamp']   = isset($result['stamp']) ? (string) $result['stamp'] : bm_wm_stamp($opts);
+    } else {
+        @unlink($target);
+    }
+    return $out;
 }
 
 /**
@@ -689,6 +730,10 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
         }
     }
 
+    // لوگوی سایت روی کاور (قبل از آپلود، تا همه‌ی سایزهای وردپرس از کاور لوگودار ساخته شوند)
+    $watermark = bm_watermark_cover_file($tmp, $file_ext);
+    $tmp       = $watermark['path'];
+
     // نام دقیق فایل نهایی؛ اگر $img_name داده نشده بود از نام اصلی فایل استفاده می‌شود
     $desired_name = !empty($img_name) ? $img_name . '.' . $file_ext : basename($tmp);
 
@@ -728,14 +773,27 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
         update_post_meta($attachment_id, '_wp_attachment_image_alt', sanitize_text_field($alt));
     }
 
+    // نشان «این کاور لوگو دارد» روی اتچمنت (bot/watermark-batch.php همین را می‌بیند و دوباره لوگو نمی‌گذارد)
+    if ($watermark['applied']) {
+        update_post_meta($attachment_id, '_bm_watermark', wp_json_encode([
+            'stamp'      => $watermark['stamp'],
+            'time'       => time(),
+            'logo_width' => isset($watermark['result']['logo_width']) ? (int) $watermark['result']['logo_width'] : 0,
+            'variant'    => isset($watermark['result']['variant']) ? (string) $watermark['result']['variant'] : '',
+            'position'   => isset($watermark['result']['position']) ? (string) $watermark['result']['position'] : '',
+            'by'         => 'bot',
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
     // ست کردن تصویر شاخص
     $set = set_post_thumbnail($post_id, $attachment_id);
 
     if (!$set) {
         return [
-            'success' => false,
-            'message' => 'اتچمنت ساخته شد ولی تصویر شاخص ثبت نشد.',
-            'id'      => $attachment_id,
+            'success'   => false,
+            'message'   => 'اتچمنت ساخته شد ولی تصویر شاخص ثبت نشد.',
+            'id'        => $attachment_id,
+            'watermark' => $watermark['note'],
         ];
     }
 
@@ -746,9 +804,10 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
         : '';
 
     return [
-        'success' => true,
-        'message' => 'تصویر شاخص با موفقیت ثبت شد' . $dims . '.',
-        'id'      => $attachment_id,
+        'success'   => true,
+        'message'   => 'تصویر شاخص با موفقیت ثبت شد' . $dims . '.' . ($watermark['note'] !== '' ? ' ' . $watermark['note'] . '.' : ''),
+        'id'        => $attachment_id,
+        'watermark' => $watermark['note'],
     ];
 }
 

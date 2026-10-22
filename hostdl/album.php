@@ -75,6 +75,10 @@ if ($coverUrl !== '') {
     $cover     = pz_download_checked($coverUrl, $candidate, ['image']);
     if ($cover['ok']) {
         $coverPath = $candidate;
+        $branded   = pz_cover_prepare($coverPath); // لوگوی سایت روی کاور (config.php)
+        if (is_array($branded['watermark']) && empty($branded['watermark']['ok'])) {
+            $warnings[] = 'cover watermark: ' . $branded['watermark']['note'];
+        }
     } else {
         $warnings[] = 'cover: ' . $cover['error'];
     }

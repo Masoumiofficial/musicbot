@@ -349,6 +349,7 @@ ul.report{margin:4px 0 0 0;padding-right:18px}
     <a class="btn gray" href="<?php echo $self; ?>">فهرست پست‌ها</a>
     <a class="btn gray" href="<?php echo esc_url(add_query_arg(['ping' => 1], $self)); ?>">تست هاست دانلود (ping)</a>
     <a class="btn gray" href="<?php echo esc_url(add_query_arg(['probe' => 1, 'check' => 0], $self)); ?>">تشخیص مسدودسازی (probe)</a>
+    <a class="btn gray" href="watermark-batch.php">لوگو روی کاورها</a>
     <form method="get" style="display:flex;gap:6px;align-items:center" action="<?php echo esc_url(strtok($self, '?')); ?>">
       <input type="hidden" name="ping" value="1">
       <input type="text" name="test" placeholder="https://.../file.mp3  (دانلود آزمایشی روی هاست دانلود)" style="width:420px" value="<?php echo dlr_h($_GET['test'] ?? ''); ?>">

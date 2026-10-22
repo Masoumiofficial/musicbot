@@ -9,7 +9,7 @@
  *
  * ورودی (POST): music320, music128, image, artist_en, song_en, mp3_name, file_320, file_128, dir_file
  * خروجی: JSON
- *   {"ok": true|false, "dir": "...", "files": [{"name", "ok", "size", "http", "error", "tags"}], "cover": {...}, "error": "..."}
+ *   {"ok": true|false, "dir": "...", "files": [{"name", "ok", "size", "http", "error", "tags"}], "cover": {..., "watermark": {"ok", "note"}}, "error": "..."}
  *   کد HTTP: 200 = همه‌ی فایل‌های خواسته‌شده منتقل شدند | 502 = دانلود از مبدأ ناموفق | 500 = خطای نوشتن روی هاست | 400 = ورودی ناقص
  *   (نسخه‌ی قبلی حتی وقتی فایل دانلود نمی‌شد 200 برمی‌گرداند و ربات «انجام شد» گزارش می‌کرد.)
  *
@@ -159,10 +159,15 @@ if ($baseDir === '') {
  |  کاور (برای تگ ID3؛ بعد از کار پاک می‌شود)
  * ------------------------------------------------------ */
 $coverPath   = "{$baseDir}/{$mp3FileName}.jpg";
-$coverResult = ['requested' => $imageUrl !== '', 'ok' => false, 'size' => 0, 'error' => ''];
+$coverResult = ['requested' => $imageUrl !== '', 'ok' => false, 'size' => 0, 'error' => '', 'watermark' => null];
 if ($imageUrl !== '') {
     $r = pz_download_checked($imageUrl, $coverPath, ['image'], music_dl_opts($imageUrl));
-    $coverResult = ['requested' => true, 'ok' => $r['ok'], 'size' => $r['size'], 'error' => $r['error']];
+    $coverResult = ['requested' => true, 'ok' => $r['ok'], 'size' => $r['size'], 'error' => $r['error'], 'watermark' => null];
+    if ($r['ok']) {
+        // لوگوی سایت روی کاور (اگر در config.php فعال باشد)؛ نتیجه در پاسخ JSON و گزارش ربات می‌آید
+        $prepared                 = pz_cover_prepare($coverPath);
+        $coverResult['watermark'] = $prepared['watermark'];
+    }
 }
 
 /* -------------------------------------------------------

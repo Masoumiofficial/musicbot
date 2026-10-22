@@ -19,6 +19,9 @@ if (!defined('PZ_BRAND')) {
     define('PZ_BRAND', isset($dl_brand) && $dl_brand !== '' ? (string) $dl_brand : '[ AhangBan.ir ]');
 }
 
+// لوگوی سایت روی کاور داخل فایل‌ها (تنظیمات $dl_watermark_* در config.php)
+require_once __DIR__ . '/watermark.php';
+
 /** آیا فیلدهای این درخواست بسته‌بندی‌شده (bm_payload) رسیده‌اند؟ */
 function pz_payload_was_wrapped() {
     return !empty($GLOBALS['pz_payload_wrapped']);
@@ -285,9 +288,38 @@ function pz_download_checked($url, $destination, array $kinds, array $opts = [])
 }
 
 /**
+ * آماده‌سازی کاور برای تگ‌نویسی: اگر در config.php فعال باشد، لوگوی سایت یک بار روی همان فایل کاور می‌نشیند
+ * (هر مسیر فقط یک بار در هر اجرا؛ آلبوم با ۳۰ قطعه هم یک بار پردازش می‌شود)
+ * خروجی: ['path' => مسیر کاور, 'watermark' => null | ['ok' => bool, 'note' => متن فارسی, 'logo_width' => int, 'variant' => string]]
+ */
+function pz_cover_prepare($cover) {
+    static $done = [];
+    $cover = (string) $cover;
+    $out   = ['path' => $cover, 'watermark' => null];
+    if ($cover === '' || !is_readable($cover)) {
+        return $out;
+    }
+    if (isset($done[$cover])) {
+        return $done[$cover];
+    }
+    $opts = bm_wm_options_from_globals('dl');
+    if (!empty($opts['enabled'])) {
+        $result           = bm_wm_apply($cover, $cover, $opts);
+        $out['watermark'] = [
+            'ok'         => !empty($result['ok']) && empty($result['skipped']),
+            'note'       => bm_wm_describe($result),
+            'logo_width' => isset($result['logo_width']) ? (int) $result['logo_width'] : 0,
+            'variant'    => isset($result['variant']) ? (string) $result['variant'] : '',
+        ];
+    }
+    $done[$cover] = $out;
+    return $out;
+}
+
+/**
  * نوشتن تگ ID3v2.3 با getID3 (همان قالب music.php)
- * $tags: title, artist, album, track, year, cover (مسیر فایل تصویر)
- * خروجی: ['ok' => bool, 'warnings' => [], 'errors' => []]
+ * $tags: title, artist, album, track, year, cover (مسیر فایل تصویر؛ اگر واترمارک فعال باشد اول لوگو روی آن می‌نشیند)
+ * خروجی: ['ok' => bool, 'warnings' => [], 'errors' => [], 'watermark' => خروجی pz_cover_prepare یا null]
  */
 function pz_write_mp3_tags($path, array $tags) {
     require_once __DIR__ . '/getid3/getid3.php';
@@ -325,7 +357,9 @@ function pz_write_mp3_tags($path, array $tags) {
         'unique_file_identifier' => ['ownerid' => PZ_BRAND, 'data' => md5($path . microtime(true))],
     ];
 
-    $cover = isset($tags['cover']) ? (string) $tags['cover'] : '';
+    $cover     = isset($tags['cover']) ? (string) $tags['cover'] : '';
+    $prepared  = pz_cover_prepare($cover);
+    $cover     = $prepared['path'];
     if ($cover !== '' && is_readable($cover)) {
         $image = @file_get_contents($cover);
         $mime  = pz_sniff($cover);
@@ -344,9 +378,10 @@ function pz_write_mp3_tags($path, array $tags) {
     $written          = $writer->WriteTags();
 
     return [
-        'ok'       => (bool) $written,
-        'warnings' => array_map('strval', (array) $writer->warnings),
-        'errors'   => array_map('strval', (array) $writer->errors),
+        'ok'        => (bool) $written,
+        'warnings'  => array_map('strval', (array) $writer->warnings),
+        'errors'    => array_map('strval', (array) $writer->errors),
+        'watermark' => $prepared['watermark'],
     ];
 }
 
