@@ -12,7 +12,9 @@
  *   هاست دانلود: همان نام‌ها با پیشوند $dl_
  *
  * چه می‌کند:
- *   - لوگوی PNG شفاف را با عرضی نسبی (درصدی از عرض کاور) در گوشه‌ی انتخابی می‌نشاند؛ حاشیه‌ی شفاف دور لوگو خودکار حذف می‌شود
+ *   - پیش‌فرض (plate = auto): پشت لوگو یک پلاک مربع/مستطیل با گوشه‌ی گرد می‌گذارد که رنگش رنگ غالبِ پررنگ همان کاور است
+ *     (سبک مربع لوگوی رادیوجوان)؛ لوگوی سفید وسط پلاک. کاور سیاه‌وسفید → پلاک خاکستری تیره. plate_color می‌تواند رنگ ثابت باشد
+ *   - plate = none: لوگوی PNG شفاف را با عرضی نسبی (درصدی از عرض کاور) در گوشه‌ی انتخابی می‌نشاند؛ حاشیه‌ی شفاف دور لوگو خودکار حذف می‌شود
  *   - روشنایی همان گوشه‌ی کاور را می‌سنجد؛ اگر روشن بود و نسخه‌ی تیره‌ی لوگو داده شده باشد از آن استفاده می‌کند،
  *     وگرنه سایه‌ی زیر لوگو را کمی پررنگ‌تر می‌کند تا لوگوی سفید خوانا بماند
  *   - زیر لوگو سایه‌ی نرم (محو) می‌اندازد تا روی کاورهای شلوغ هم دیده شود
@@ -40,6 +42,13 @@ if (!function_exists('bm_wm_defaults')) {
             'min_cover'       => 240,           // کاور با ضلع کوچک‌تر از این لوگو نمی‌گیرد
             'light_threshold' => 0.6,           // روشنایی ۰ تا ۱؛ بالاتر از این = گوشه‌ی روشن
             'jpeg_quality'    => 90,
+            // پلاک رنگی پشت لوگو (سبک رادیوجوان): none = لوگوی آزاد با سایه؛ auto = مربع برای لوگوی مربعی، مستطیل برای لوگوی کشیده
+            'plate'           => 'auto',        // none | auto | square | rect
+            'plate_color'     => 'auto',        // auto = رنگ غالبِ پررنگ همان کاور؛ یا رنگ ثابت مثل '#1e1e1e'
+            'plate_size'      => 13,            // ضلع پلاک مربع، درصد عرض کاور (پلاک مستطیل از عرض لوگو + حاشیه ساخته می‌شود)
+            'plate_radius'    => 10,            // گردی گوشه‌ها، درصد ضلع کوچک‌تر پلاک (0 = تیز، 50 = کاملاً گرد)
+            'plate_opacity'   => 100,           // درصد
+            'plate_padding'   => 18,            // فاصله‌ی لوگو تا لبه‌ی پلاک مربع، درصد ضلع
         ];
     }
 
@@ -64,6 +73,11 @@ if (!function_exists('bm_wm_defaults')) {
             'opacity'   => 'opacity',
             'shadow'    => 'shadow',
             'min_cover' => 'min_cover',
+            'plate'         => 'plate',
+            'plate_color'   => 'plate_color',
+            'plate_size'    => 'plate_size',
+            'plate_radius'  => 'plate_radius',
+            'plate_opacity' => 'plate_opacity',
         ];
         foreach ($map as $suffix => $key) {
             if (array_key_exists($base . '_' . $suffix, $GLOBALS)) {
@@ -89,6 +103,19 @@ if (!function_exists('bm_wm_defaults')) {
         $o['max_width']       = (int) $o['max_width'] > 0 ? max($o['min_width'], (int) $o['max_width']) : 0;
         $o['light_threshold'] = min(1, max(0, (float) $o['light_threshold']));
         $o['jpeg_quality']    = min(100, max(50, (int) $o['jpeg_quality']));
+        $plate                = strtolower(trim((string) $o['plate']));
+        if ($plate === '' || $plate === '0' || $plate === 'false' || $plate === 'off') {
+            $plate = 'none';
+        } elseif ($plate === '1' || $plate === 'true' || $plate === 'on') {
+            $plate = 'auto';
+        }
+        $o['plate']           = in_array($plate, ['none', 'auto', 'square', 'rect'], true) ? $plate : 'auto';
+        $plate_color          = strtolower(trim((string) $o['plate_color']));
+        $o['plate_color']     = bm_wm_hex_to_rgb($plate_color) !== null ? '#' . ltrim($plate_color, '#') : 'auto';
+        $o['plate_size']      = min(50, max(5, (float) $o['plate_size']));
+        $o['plate_radius']    = min(50, max(0, (float) $o['plate_radius']));
+        $o['plate_opacity']   = min(100, max(10, (int) $o['plate_opacity']));
+        $o['plate_padding']   = min(40, max(5, (float) $o['plate_padding']));
         return $o;
     }
 
@@ -204,6 +231,12 @@ if (!function_exists('bm_wm_defaults')) {
             $o['shadow'] ? '1' : '0',
             (string) $o['shadow_opacity'],
             (string) $o['min_cover'],
+            $o['plate'],
+            $o['plate_color'],
+            (string) $o['plate_size'],
+            (string) $o['plate_radius'],
+            (string) $o['plate_opacity'],
+            (string) $o['plate_padding'],
         ];
         return substr(md5(implode('|', $parts)), 0, 12);
     }
@@ -494,12 +527,204 @@ if (!function_exists('bm_wm_defaults')) {
         return $copied;
     }
 
+    /** RGB (۰..۲۵۵) → HSV (۰..۱) */
+    function bm_wm_rgb_to_hsv($r, $g, $b) {
+        $r   = $r / 255;
+        $g   = $g / 255;
+        $b   = $b / 255;
+        $max = max($r, $g, $b);
+        $min = min($r, $g, $b);
+        $d   = $max - $min;
+        $v   = $max;
+        $s   = $max > 0 ? $d / $max : 0;
+        $h   = 0;
+        if ($d > 0) {
+            if ($max == $r) {
+                $h = fmod(($g - $b) / $d, 6);
+            } elseif ($max == $g) {
+                $h = ($b - $r) / $d + 2;
+            } else {
+                $h = ($r - $g) / $d + 4;
+            }
+            $h = $h / 6;
+            if ($h < 0) {
+                $h += 1;
+            }
+        }
+        return [$h, $s, $v];
+    }
+
+    /** HSV (۰..۱) → RGB (۰..۲۵۵) */
+    function bm_wm_hsv_to_rgb($h, $s, $v) {
+        $i = (int) floor($h * 6) % 6;
+        $f = $h * 6 - floor($h * 6);
+        $p = $v * (1 - $s);
+        $q = $v * (1 - $f * $s);
+        $t = $v * (1 - (1 - $f) * $s);
+        switch ($i) {
+            case 0:
+                $rgb = [$v, $t, $p];
+                break;
+            case 1:
+                $rgb = [$q, $v, $p];
+                break;
+            case 2:
+                $rgb = [$p, $v, $t];
+                break;
+            case 3:
+                $rgb = [$p, $q, $v];
+                break;
+            case 4:
+                $rgb = [$t, $p, $v];
+                break;
+            default:
+                $rgb = [$v, $p, $q];
+        }
+        return [(int) round($rgb[0] * 255), (int) round($rgb[1] * 255), (int) round($rgb[2] * 255)];
+    }
+
+    /** '#1e90ff' → [30, 144, 255] یا null */
+    function bm_wm_hex_to_rgb($hex) {
+        $hex = ltrim(trim((string) $hex), '#');
+        if (strlen($hex) === 3) {
+            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+        }
+        if (!preg_match('/^[0-9a-fA-F]{6}$/', $hex)) {
+            return null;
+        }
+        return [hexdec(substr($hex, 0, 2)), hexdec(substr($hex, 2, 2)), hexdec(substr($hex, 4, 2))];
+    }
+
+    function bm_wm_rgb_to_hex(array $rgb) {
+        return sprintf('#%02x%02x%02x', (int) $rgb[0], (int) $rgb[1], (int) $rgb[2]);
+    }
+
+    /** روشنایی ادراکی ۰..۱ یک رنگ */
+    function bm_wm_rgb_luminance(array $rgb) {
+        return (0.299 * $rgb[0] + 0.587 * $rgb[1] + 0.114 * $rgb[2]) / 255;
+    }
+
+    /**
+     * رنگ غالبِ پررنگ کاور (برای پلاک لوگو): رنگ اشباع‌شده‌ای که بیشترین سطح را دارد؛ سیاه/سفید/خاکستری نادیده گرفته می‌شود
+     * (شبیه کاری که رادیوجوان با رنگ مربع لوگویش می‌کند). کاور ۶۴ پیکسلی نمونه‌برداری و رنگ‌ها در خانه‌های HSV جمع می‌شوند.
+     * خروجی: ['rgb' => [r, g, b], 'hex' => '#rrggbb', 'saturated' => bool]
+     */
+    function bm_wm_dominant_color($image) {
+        $w  = imagesx($image);
+        $h  = imagesy($image);
+        $sw = 64;
+        $sh = max(1, (int) round($sw * $h / max(1, $w)));
+        $small = imagecreatetruecolor($sw, $sh);
+        imagecopyresampled($small, $image, 0, 0, 0, 0, $sw, $sh, $w, $h);
+
+        $bins = [];
+        for ($y = 0; $y < $sh; $y++) {
+            for ($x = 0; $x < $sw; $x++) {
+                $c = imagecolorat($small, $x, $y);
+                $r = ($c >> 16) & 0xFF;
+                $g = ($c >> 8) & 0xFF;
+                $b = $c & 0xFF;
+                list($hue, $s, $v) = bm_wm_rgb_to_hsv($r, $g, $b);
+                // وزن: اشباع بالا و نه خیلی تیره؛ تقریباً سفیدها حذف
+                $weight = pow($s, 1.5) * min(1, $v / 0.45);
+                if ($v > 0.93 && $s < 0.25) {
+                    $weight = 0;
+                }
+                if ($weight < 0.03) {
+                    continue;
+                }
+                $key = (((int) floor($hue * 24)) % 24) + 24 * ($s >= 0.5 ? 1 : 0) + 48 * min(2, (int) floor($v * 3));
+                if (!isset($bins[$key])) {
+                    $bins[$key] = [0.0, 0.0, 0.0, 0.0];
+                }
+                $bins[$key][0] += $weight;
+                $bins[$key][1] += $r * $weight;
+                $bins[$key][2] += $g * $weight;
+                $bins[$key][3] += $b * $weight;
+            }
+        }
+        bm_wm_free($small);
+
+        $best = null;
+        foreach ($bins as $bin) {
+            if ($best === null || $bin[0] > $best[0]) {
+                $best = $bin;
+            }
+        }
+        // کاور سیاه‌وسفید یا بدون رنگ شاخص → پلاک خاکستری تیره
+        if ($best === null || $best[0] < $sw * $sh * 0.012) {
+            return ['rgb' => [38, 38, 44], 'hex' => '#26262c', 'saturated' => false];
+        }
+        $rgb = [$best[1] / $best[0], $best[2] / $best[0], $best[3] / $best[0]];
+        // بازه‌ی دلپذیر برای پلاک: نه خیلی روشن (لوگوی سفید خوانا بماند) نه خیلی تیره/کدر
+        list($hue, $s, $v) = bm_wm_rgb_to_hsv($rgb[0], $rgb[1], $rgb[2]);
+        $s   = min(0.92, max(0.3, $s));
+        $v   = min(0.78, max(0.3, $v));
+        $rgb = bm_wm_hsv_to_rgb($hue, $s, $v);
+        return ['rgb' => $rgb, 'hex' => bm_wm_rgb_to_hex($rgb), 'saturated' => true];
+    }
+
+    /**
+     * لایه‌ی پلاک: مستطیل با گوشه‌ی گرد و لبه‌ی نرم (۴ برابر بزرگ کشیده و کوچک می‌شود)
+     * خروجی: ['img' => GD, 'w', 'h', 'coverage' => پوشش ۰..۱ هر پیکسل (برای سایه)]
+     */
+    function bm_wm_plate_layer($w, $h, $radius, array $rgb, $opacity) {
+        $w  = max(2, (int) $w);
+        $h  = max(2, (int) $h);
+        $ss = 4;
+        $W  = $w * $ss;
+        $H  = $h * $ss;
+        $R  = (int) round(min((float) $radius, min($w, $h) / 2) * $ss);
+
+        $big = imagecreatetruecolor($W, $H);
+        imagealphablending($big, false);
+        imagesavealpha($big, true);
+        imagefill($big, 0, 0, 0x7F000000);
+        $color = imagecolorallocatealpha($big, (int) $rgb[0], (int) $rgb[1], (int) $rgb[2], 0);
+        if ($R > 0) {
+            imagefilledrectangle($big, $R, 0, $W - 1 - $R, $H - 1, $color);
+            imagefilledrectangle($big, 0, $R, $W - 1, $H - 1 - $R, $color);
+            imagefilledellipse($big, $R, $R, 2 * $R, 2 * $R, $color);
+            imagefilledellipse($big, $W - 1 - $R, $R, 2 * $R, 2 * $R, $color);
+            imagefilledellipse($big, $R, $H - 1 - $R, 2 * $R, 2 * $R, $color);
+            imagefilledellipse($big, $W - 1 - $R, $H - 1 - $R, 2 * $R, 2 * $R, $color);
+        } else {
+            imagefilledrectangle($big, 0, 0, $W - 1, $H - 1, $color);
+        }
+
+        $layer = imagecreatetruecolor($w, $h);
+        imagealphablending($layer, false);
+        imagesavealpha($layer, true);
+        imagefill($layer, 0, 0, 0x7F000000);
+        imagecopyresampled($layer, $big, 0, 0, 0, 0, $w, $h, $W, $H);
+        bm_wm_free($big);
+
+        $factor   = min(100, max(10, (int) $opacity)) / 100;
+        $coverage = array_fill(0, $w * $h, 0.0);
+        for ($y = 0; $y < $h; $y++) {
+            for ($x = 0; $x < $w; $x++) {
+                $c       = imagecolorat($layer, $x, $y);
+                $visible = 127 - (($c >> 24) & 0x7F);
+                if ($visible <= 0) {
+                    continue;
+                }
+                if ($factor < 1) {
+                    $visible = (int) round($visible * $factor);
+                    imagesetpixel($layer, $x, $y, ((127 - $visible) << 24) | ($c & 0xFFFFFF));
+                }
+                $coverage[$y * $w + $x] = $visible / 127;
+            }
+        }
+        return ['img' => $layer, 'w' => $w, 'h' => $h, 'coverage' => $coverage];
+    }
+
     /**
      * نشاندن لوگو روی کاور
      * $src: فایل کاور؛ $dst: مسیر خروجی (می‌تواند همان $src باشد — فایل اول کامل خوانده می‌شود)
      * خروجی: [
      *   'ok' => bool, 'skipped' => bool, 'reason' => small, 'error' => gd|logo_missing|logo_not_image|logo_not_transparent|cover|write|disabled,
-     *   'width', 'height' (کاور)، 'logo_width', 'logo_height', 'x', 'y', 'variant' => light|dark, 'luminance', 'position', 'format', 'stamp'
+     *   'width', 'height' (کاور)، 'logo_width', 'logo_height', 'x', 'y', 'variant' => light|dark, 'luminance', 'position', 'format', 'stamp',
+     *   'plate' => ''|square|rect, 'plate_color' => '#rrggbb', 'plate_width', 'plate_height'
      * ]
      * وقتی skipped = true فایلی نوشته نمی‌شود.
      */
@@ -509,7 +734,7 @@ if (!function_exists('bm_wm_defaults')) {
             'ok' => false, 'skipped' => false, 'reason' => '', 'error' => '', 'detail' => '',
             'width' => 0, 'height' => 0, 'logo_width' => 0, 'logo_height' => 0, 'x' => 0, 'y' => 0,
             'variant' => '', 'luminance' => null, 'position' => $o['position'], 'format' => '', 'stamp' => '',
-            'logo' => $o['logo'],
+            'logo' => $o['logo'], 'plate' => '', 'plate_color' => '', 'plate_width' => 0, 'plate_height' => 0,
         ];
 
         if (!bm_wm_available()) {
@@ -542,8 +767,6 @@ if (!function_exists('bm_wm_defaults')) {
             return $result;
         }
 
-        // اندازه‌ی لوگو: درصدی از عرض کاور؛ برای لوگوهای خیلی کشیده (مثل نوشته‌ی تنها) ارتفاع از ۳٪ عرض کاور کمتر نمی‌شود
-        // (تا حداکثر ۱.۷ برابر عرض تنظیم‌شده) و برای لوگوهای مربعی/بلند ارتفاع از ۱۲٪ عرض کاور بیشتر نمی‌شود
         $source = bm_wm_logo_source($o['logo']);
         if (!$source) {
             bm_wm_free($cover);
@@ -551,6 +774,10 @@ if (!function_exists('bm_wm_defaults')) {
             return $result;
         }
         $aspect = max(0.05, (float) $source['aspect']);
+        $margin = (int) round($width * $o['margin'] / 100);
+
+        // عرض لوگوی آزاد: درصدی از عرض کاور؛ برای لوگوهای خیلی کشیده ارتفاع از ۳٪ عرض کاور کمتر نمی‌شود
+        // (تا حداکثر ۱.۷ برابر عرض تنظیم‌شده) و برای لوگوهای مربعی/بلند ارتفاع از ۱۲٪ عرض کاور بیشتر نمی‌شود
         $logo_w = $width * $o['width'] / 100;
         $min_h  = $width * 0.03;
         $max_h  = $width * 0.12;
@@ -562,56 +789,153 @@ if (!function_exists('bm_wm_defaults')) {
         $logo_w = (int) round($logo_w);
         $logo_w = max($o['min_width'], $o['max_width'] > 0 ? min($o['max_width'], $logo_w) : $logo_w);
         $logo_w = max(8, min($logo_w, (int) floor($width * 0.6)));
-        $margin = (int) round($width * $o['margin'] / 100);
-
-        $layer = bm_wm_logo_layer($o['logo'], $logo_w, $o['opacity']);
-        if (!$layer) {
-            bm_wm_free($cover);
-            $result['error'] = 'logo_not_image';
-            return $result;
-        }
-        $variant   = 'light';
-        $layer_key = $o['logo'];
-        $logo_h    = $layer['h'];
 
         $place = function ($lw, $lh) use ($o, $width, $height, $margin) {
             $x = $o['position'] === 'bottom-left' || $o['position'] === 'top-left' ? $margin : $width - $margin - $lw;
             $y = $o['position'] === 'top-left' || $o['position'] === 'top-right' ? $margin : $height - $margin - $lh;
             return [max(0, $x), max(0, $y)];
         };
-        list($x, $y) = $place($logo_w, $logo_h);
 
-        // روشنایی گوشه → نسخه‌ی تیره یا سایه‌ی پررنگ‌تر
-        $luminance       = bm_wm_region_luminance($cover, $x - (int) ($margin / 2), $y - (int) ($margin / 2), $logo_w + $margin, $logo_h + $margin);
-        $shadow_strength = $o['shadow_opacity'] / 100;
-        if ($luminance > $o['light_threshold']) {
-            $dark_info = $o['logo_dark'] !== '' ? bm_wm_logo_info($o['logo_dark']) : ['ok' => false];
-            $dark      = $dark_info['ok'] ? bm_wm_logo_layer($o['logo_dark'], $logo_w, $o['opacity']) : null;
-            if ($dark) {
-                // لوگوی تیره با هاله‌ی روشن (اگر گوشه لکه‌های تیره داشت باز هم خوانا می‌ماند)
-                $layer           = $dark;
-                $layer_key       = $o['logo_dark'];
-                $variant         = 'dark';
-                $logo_h          = $layer['h'];
-                $shadow_strength = min(0.9, $shadow_strength + 0.25);
-                list($x, $y)     = $place($logo_w, $logo_h);
+        $shape = $o['plate'];
+        if ($shape === 'auto') {
+            $shape = $aspect <= 1.35 ? 'square' : 'rect';
+        }
+
+        if ($shape !== 'none') {
+            /* ---------- حالت پلاک: مربع/مستطیل رنگی پشت لوگو (رنگ = رنگ غالب کاور یا رنگ ثابت) ---------- */
+            if ($shape === 'square') {
+                $side = (int) round($width * $o['plate_size'] / 100);
+                $side = max(32, min($side, (int) floor($width * 0.5)));
+                $pad  = (int) round($side * $o['plate_padding'] / 100);
+                $box  = max(4, $side - 2 * $pad);
+                $lw   = $aspect >= 1 ? $box : max(4, (int) round($box * $aspect));
+                $pw   = $side;
+                $ph   = $side;
             } else {
-                $shadow_strength = min(0.9, $shadow_strength + 0.3);
+                $lw    = $logo_w;
+                $lh0   = max(1, (int) round($lw / $aspect));
+                $pad_y = max(3, (int) round($lh0 * 0.5));
+                $pad_x = max($pad_y, (int) round($lh0 * 0.7));
+                $pw    = $lw + 2 * $pad_x;
+                $ph    = $lh0 + 2 * $pad_y;
             }
-        }
 
-        // بوم سفید (برای PNG شفاف هم خروجی درست می‌دهد) + کاور + سایه + لوگو
-        $canvas = imagecreatetruecolor($width, $height);
-        imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
-        imagealphablending($canvas, true);
-        imagecopy($canvas, $cover, 0, 0, 0, 0, $width, $height);
-        bm_wm_free($cover);
+            $plate_rgb = null;
+            if ($o['plate_color'] !== 'auto') {
+                $plate_rgb = bm_wm_hex_to_rgb($o['plate_color']);
+            }
+            if ($plate_rgb === null) {
+                $dominant  = bm_wm_dominant_color($cover);
+                $plate_rgb = $dominant['rgb'];
+            }
+            $plate_lum = bm_wm_rgb_luminance($plate_rgb);
+            $variant   = 'light';
+            $logo_path = $o['logo'];
+            if ($plate_lum > 0.62) {
+                $dark_info = $o['logo_dark'] !== '' ? bm_wm_logo_info($o['logo_dark']) : ['ok' => false];
+                if ($dark_info['ok'] && bm_wm_logo_source($o['logo_dark'])) {
+                    $variant   = 'dark';
+                    $logo_path = $o['logo_dark'];
+                } else {
+                    // پلاک روشن بدون لوگوی تیره: پلاک کمی تیره‌تر می‌شود تا لوگوی سفید خوانا بماند
+                    list($ph_h, $ph_s, $ph_v) = bm_wm_rgb_to_hsv($plate_rgb[0], $plate_rgb[1], $plate_rgb[2]);
+                    $plate_rgb = bm_wm_hsv_to_rgb($ph_h, min(0.95, $ph_s + 0.1), $ph_v * 0.72);
+                }
+            }
 
-        if ($o['shadow'] && $shadow_strength > 0) {
-            $shadow = bm_wm_shadow_layer($layer_key . '|' . $logo_w . '|' . $o['opacity'], $layer, $shadow_strength, $variant === 'dark');
-            imagecopy($canvas, $shadow['img'], $x - $shadow['pad'], $y - $shadow['pad'] + $shadow['dy'], 0, 0, $shadow['w'], $shadow['h']);
+            $logo_layer = bm_wm_logo_layer($logo_path, $lw, 100);
+            if (!$logo_layer) {
+                bm_wm_free($cover);
+                $result['error'] = 'logo_not_image';
+                return $result;
+            }
+            $lh = $logo_layer['h'];
+            if ($shape === 'square' && $lh > $pw - 2 * (int) round($pw * $o['plate_padding'] / 100)) {
+                // لوگوی بلندتر از پهن: با ارتفاع جا بیفتد
+                $box        = max(4, $pw - 2 * (int) round($pw * $o['plate_padding'] / 100));
+                $lw         = max(4, (int) round($box * $aspect));
+                $logo_layer = bm_wm_logo_layer($logo_path, $lw, 100);
+                $lh         = $logo_layer['h'];
+            }
+            if ($shape !== 'square') {
+                $ph = $lh + 2 * $pad_y;
+            }
+
+            $radius = min($pw, $ph) * $o['plate_radius'] / 100;
+            $plate  = bm_wm_plate_layer($pw, $ph, $radius, $plate_rgb, $o['plate_opacity']);
+            imagealphablending($plate['img'], true);
+            imagecopy($plate['img'], $logo_layer['img'], (int) round(($pw - $lw) / 2), (int) round(($ph - $lh) / 2), 0, 0, $logo_layer['w'], $logo_layer['h']);
+
+            list($x, $y) = $place($pw, $ph);
+            $luminance   = bm_wm_region_luminance($cover, $x - (int) ($margin / 2), $y - (int) ($margin / 2), $pw + $margin, $ph + $margin);
+
+            $canvas = imagecreatetruecolor($width, $height);
+            imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
+            imagealphablending($canvas, true);
+            imagecopy($canvas, $cover, 0, 0, 0, 0, $width, $height);
+            bm_wm_free($cover);
+
+            if ($o['shadow']) {
+                $shadow = bm_wm_shadow_layer('plate|' . $pw . 'x' . $ph . '|' . round($radius, 1) . '|' . $o['plate_opacity'], $plate, 0.22, false);
+                imagecopy($canvas, $shadow['img'], $x - $shadow['pad'], $y - $shadow['pad'] + $shadow['dy'], 0, 0, $shadow['w'], $shadow['h']);
+            }
+            imagecopy($canvas, $plate['img'], $x, $y, 0, 0, $pw, $ph);
+            bm_wm_free($plate['img']);
+
+            $result['plate']        = $shape;
+            $result['plate_color']  = bm_wm_rgb_to_hex($plate_rgb);
+            $result['plate_width']  = $pw;
+            $result['plate_height'] = $ph;
+            $result['logo_width']   = $logo_layer['w'];
+            $result['logo_height']  = $logo_layer['h'];
+        } else {
+            /* ---------- حالت آزاد: لوگو با سایه، بدون پلاک ---------- */
+            $layer = bm_wm_logo_layer($o['logo'], $logo_w, $o['opacity']);
+            if (!$layer) {
+                bm_wm_free($cover);
+                $result['error'] = 'logo_not_image';
+                return $result;
+            }
+            $variant   = 'light';
+            $layer_key = $o['logo'];
+            $logo_h    = $layer['h'];
+            list($x, $y) = $place($logo_w, $logo_h);
+
+            // روشنایی گوشه → نسخه‌ی تیره یا سایه‌ی پررنگ‌تر
+            $luminance       = bm_wm_region_luminance($cover, $x - (int) ($margin / 2), $y - (int) ($margin / 2), $logo_w + $margin, $logo_h + $margin);
+            $shadow_strength = $o['shadow_opacity'] / 100;
+            if ($luminance > $o['light_threshold']) {
+                $dark_info = $o['logo_dark'] !== '' ? bm_wm_logo_info($o['logo_dark']) : ['ok' => false];
+                $dark      = $dark_info['ok'] ? bm_wm_logo_layer($o['logo_dark'], $logo_w, $o['opacity']) : null;
+                if ($dark) {
+                    // لوگوی تیره با هاله‌ی روشن (اگر گوشه لکه‌های تیره داشت باز هم خوانا می‌ماند)
+                    $layer           = $dark;
+                    $layer_key       = $o['logo_dark'];
+                    $variant         = 'dark';
+                    $logo_h          = $layer['h'];
+                    $shadow_strength = min(0.9, $shadow_strength + 0.25);
+                    list($x, $y)     = $place($logo_w, $logo_h);
+                } else {
+                    $shadow_strength = min(0.9, $shadow_strength + 0.3);
+                }
+            }
+
+            // بوم سفید (برای PNG شفاف هم خروجی درست می‌دهد) + کاور + سایه + لوگو
+            $canvas = imagecreatetruecolor($width, $height);
+            imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
+            imagealphablending($canvas, true);
+            imagecopy($canvas, $cover, 0, 0, 0, 0, $width, $height);
+            bm_wm_free($cover);
+
+            if ($o['shadow'] && $shadow_strength > 0) {
+                $shadow = bm_wm_shadow_layer($layer_key . '|' . $logo_w . '|' . $o['opacity'], $layer, $shadow_strength, $variant === 'dark');
+                imagecopy($canvas, $shadow['img'], $x - $shadow['pad'], $y - $shadow['pad'] + $shadow['dy'], 0, 0, $shadow['w'], $shadow['h']);
+            }
+            imagecopy($canvas, $layer['img'], $x, $y, 0, 0, $layer['w'], $layer['h']);
+
+            $result['logo_width']  = $layer['w'];
+            $result['logo_height'] = $layer['h'];
         }
-        imagecopy($canvas, $layer['img'], $x, $y, 0, 0, $layer['w'], $layer['h']);
 
         $format = bm_wm_output_format($dst, $type);
         $saved  = bm_wm_save($canvas, $dst, $format, $o['jpeg_quality']);
@@ -622,15 +946,13 @@ if (!function_exists('bm_wm_defaults')) {
             return $result;
         }
 
-        $result['ok']          = true;
-        $result['logo_width']  = $layer['w'];
-        $result['logo_height'] = $layer['h'];
-        $result['x']           = $x;
-        $result['y']           = $y;
-        $result['variant']     = $variant;
-        $result['luminance']   = round($luminance, 3);
-        $result['format']      = $format;
-        $result['stamp']       = bm_wm_stamp($o);
+        $result['ok']        = true;
+        $result['x']         = $x;
+        $result['y']         = $y;
+        $result['variant']   = $variant;
+        $result['luminance'] = round($luminance, 3);
+        $result['format']    = $format;
+        $result['stamp']     = bm_wm_stamp($o);
         return $result;
     }
 
@@ -640,6 +962,11 @@ if (!function_exists('bm_wm_defaults')) {
             return '';
         }
         if (!empty($result['ok']) && empty($result['skipped'])) {
+            if (!empty($result['plate'])) {
+                return 'لوگو نشست (پلاک ' . ($result['plate'] === 'square' ? 'مربع ' : 'مستطیل ') . (int) $result['plate_width'] . 'px به رنگ '
+                    . $result['plate_color'] . '، ' . bm_wm_position_label($result['position'])
+                    . ($result['variant'] === 'dark' ? '، لوگوی تیره روی پلاک روشن' : '') . ')';
+            }
             return 'لوگو نشست (' . (int) $result['logo_width'] . 'px، ' . bm_wm_position_label($result['position'])
                 . ($result['variant'] === 'dark' ? '، نسخه‌ی تیره روی گوشه‌ی روشن' : '') . ')';
         }

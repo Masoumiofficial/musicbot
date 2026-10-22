@@ -781,6 +781,8 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
             'logo_width' => isset($watermark['result']['logo_width']) ? (int) $watermark['result']['logo_width'] : 0,
             'variant'    => isset($watermark['result']['variant']) ? (string) $watermark['result']['variant'] : '',
             'position'   => isset($watermark['result']['position']) ? (string) $watermark['result']['position'] : '',
+            'plate'      => isset($watermark['result']['plate']) ? (string) $watermark['result']['plate'] : '',
+            'plate_color' => isset($watermark['result']['plate_color']) ? (string) $watermark['result']['plate_color'] : '',
             'by'         => 'bot',
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
