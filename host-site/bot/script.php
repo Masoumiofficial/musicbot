@@ -345,54 +345,162 @@ function bm_curl_post_json($url, array $payload, $timeout = 30) {
     ];
 }
 
+/** User-Agent مرورگر برای تماس با هاست دانلود؛ nginx/WAF خیلی از هاست‌ها درخواست بدون User-Agent را 403 می‌کند */
+function bm_http_user_agent() {
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 AhangBan-Bot';
+}
+
+/** هدرهای عمومی هر درخواست به هاست دانلود (Expect خالی = بدون 100-continue که بعضی پراکسی‌ها خراب می‌کنند) */
+function bm_http_headers(array $extra = []) {
+    return array_merge([
+        'Accept: application/json, text/html;q=0.9, */*;q=0.8',
+        'Accept-Language: fa,en;q=0.8',
+        'Expect:',
+    ], $extra);
+}
+
 /**
- * درخواست POST فرم‌دیتا با cURL
- * $userpwd = «user:pass» برای HTTP Basic Auth (خالی = بدون احراز هویت)
+ * بسته‌بندی فیلدهای فرم در یک فیلد (bm_payload = base64url(JSON))
+ * وقتی WAF هاست دانلود (ModSecurity / Imunify360 و ...) فیلدهایی را که لینک خارجی دارند به‌عنوان «RFI» با 403 رد می‌کند،
+ * همان داده‌ها در این قالب رد می‌شود؛ common.php روی هاست دانلود آن را باز می‌کند و در $_POST می‌گذارد.
  */
-function bm_curl_post_form($url, array $payload, $timeout = 120, $userpwd = '') {
+function bm_wrap_payload(array $payload) {
+    $json = wp_json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    return ['bm_payload' => rtrim(strtr(base64_encode($json), '+/', '-_'), '='), 'bm_payload_v' => '1'];
+}
+
+/**
+ * آیا پاسخ، صفحه‌ی خطای خود وب‌سرور/WAF است (نه خروجی اسکریپت گیرنده)؟
+ * مثل «403 Forbidden nginx» — در این حالت ارسال با قالب دیگر امتحان می‌شود
+ */
+function bm_response_blocked_by_server($code, $body) {
+    $code = (int) $code;
+    $body = (string) $body;
+    if ($code === 0) {
+        return false; // خطای اتصال؛ قالب ارسال ربطی ندارد
+    }
+    $trimmed = ltrim($body);
+    $is_json = $trimmed !== '' && ($trimmed[0] === '{' || $trimmed[0] === '[');
+    if ($is_json) {
+        return false;
+    }
+    if (in_array($code, [403, 406, 409, 412, 418, 429, 501], true)) {
+        return true;
+    }
+    return $code >= 400 && (stripos($body, 'Forbidden') !== false || stripos($body, 'Not Acceptable') !== false || stripos($body, 'Mod_Security') !== false || stripos($body, 'ModSecurity') !== false);
+}
+
+/**
+ * درخواست POST فرم با cURL به گیرنده‌های هاست دانلود
+ * $userpwd = «user:pass» برای HTTP Basic Auth (خالی = بدون احراز هویت)
+ * $transport (قالب بدنه‌ی درخواست):
+ *   'form'      = application/x-www-form-urlencoded — فرم ساده؛ همان $_POST در گیرنده (با music.php قدیمی هم کار می‌کند)
+ *   'wrapped'   = همان فیلدها در یک فیلد bm_payload (base64url از JSON) — برای وقتی WAF لینک‌های داخل فرم را رد می‌کند
+ *   'multipart' = multipart/form-data — قالب قدیمی ربات؛ شبیه «آپلود فایل» است و بعد از آسیب‌پذیری PHP2Shell
+ *                 (CVE-2026-109618/109619، مهر ۱۴۰۵) خیلی از هاست‌ها آن را در وب‌سرور با 403 رد می‌کنند
+ *   'auto' (پیش‌فرض) = form ← اگر وب‌سرور/WAF رد کرد wrapped ← اگر باز هم رد کرد multipart
+ * خروجی: success, error, code, body, transport (قالبی که جواب از آن آمده), attempts (گزارش کوتاه تلاش‌ها)
+ */
+function bm_curl_post_form($url, array $payload, $timeout = 120, $userpwd = '', $transport = '') {
     if (empty($url)) {
         return [
-            'success' => false,
-            'error'   => 'Download endpoint is empty.',
-            'code'    => 0,
-            'body'    => '',
+            'success'   => false,
+            'error'     => 'Download endpoint is empty.',
+            'code'      => 0,
+            'body'      => '',
+            'transport' => '',
+            'attempts'  => '',
         ];
     }
 
-    $ch = curl_init($url);
-
-    $options = [
-        CURLOPT_POST           => true,
-        CURLOPT_POSTFIELDS     => $payload,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CONNECTTIMEOUT => 20,
-        CURLOPT_TIMEOUT        => $timeout,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false,
-    ];
-
-    if ($userpwd !== '') {
-        $options[CURLOPT_HTTPAUTH] = CURLAUTH_BASIC;
-        $options[CURLOPT_USERPWD]  = $userpwd;
+    if ($transport === '') {
+        $transport = isset($GLOBALS['bot_dl_transport']) ? (string) $GLOBALS['bot_dl_transport'] : 'auto';
+    }
+    if (!in_array($transport, ['auto', 'form', 'wrapped', 'multipart'], true)) {
+        $transport = 'auto';
     }
 
-    curl_setopt_array($ch, $options);
-
-    $body  = curl_exec($ch);
-    $error = curl_error($ch);
-    $errno = curl_errno($ch);
-    $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-    if (PHP_VERSION_ID < 80000) {
-        curl_close($ch); // از PHP 8 بی‌اثر و در 8.5 منسوخ است
+    // اگر در همین اجرا قالبی رد شده و قالب دیگری جواب داده، از همان ادامه می‌دهیم
+    if ($transport === 'auto' && !empty($GLOBALS['bm_dl_transport_pref'])) {
+        $transport = (string) $GLOBALS['bm_dl_transport_pref'];
     }
 
-    return [
-        'success' => ($errno === 0 && $code >= 200 && $code < 300),
-        'error'   => $error,
-        'code'    => $code,
-        'body'    => $body,
-    ];
+    // فایل پیوست (CURLFile) فقط با multipart می‌رود
+    foreach ($payload as $value) {
+        if (is_object($value)) {
+            $transport = 'multipart';
+            break;
+        }
+    }
+
+    $order    = $transport === 'auto' ? ['form', 'wrapped', 'multipart'] : [$transport];
+    $attempts = [];
+    $last     = null;
+    $names    = ['form' => 'فرم ساده', 'wrapped' => 'بسته‌بندی‌شده', 'multipart' => 'multipart'];
+
+    foreach ($order as $mode) {
+        $ch      = curl_init($url);
+        $headers = bm_http_headers();
+        if ($mode === 'wrapped') {
+            $fields    = http_build_query(bm_wrap_payload($payload), '', '&');
+            $headers[] = 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8';
+        } elseif ($mode === 'form') {
+            $fields    = http_build_query($payload, '', '&');
+            $headers[] = 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8';
+        } else {
+            $fields = $payload; // multipart/form-data
+        }
+
+        $options = [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $fields,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 20,
+            CURLOPT_TIMEOUT        => $timeout,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_USERAGENT      => bm_http_user_agent(),
+            CURLOPT_HTTPHEADER     => $headers,
+        ];
+
+        if ($userpwd !== '') {
+            $options[CURLOPT_HTTPAUTH] = CURLAUTH_BASIC;
+            $options[CURLOPT_USERPWD]  = $userpwd;
+        }
+
+        curl_setopt_array($ch, $options);
+
+        $body  = curl_exec($ch);
+        $error = curl_error($ch);
+        $errno = curl_errno($ch);
+        $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        if (PHP_VERSION_ID < 80000) {
+            curl_close($ch); // از PHP 8 بی‌اثر و در 8.5 منسوخ است
+        }
+
+        $last = [
+            'success'   => ($errno === 0 && $code >= 200 && $code < 300),
+            'error'     => $error,
+            'code'      => $code,
+            'body'      => (string) $body,
+            'transport' => $mode,
+            'attempts'  => '',
+        ];
+        $attempts[] = $names[$mode] . ': ' . ($errno !== 0 ? 'cURL ' . $error : 'HTTP ' . (int) $code);
+
+        if ($last['success'] || !bm_response_blocked_by_server($code, $body) || count($order) === 1) {
+            break;
+        }
+        // وب‌سرور/WAF رد کرد؛ قالب بعدی
+    }
+
+    $last['attempts'] = implode(' ← ', $attempts);
+    if ($transport === 'auto' && count($attempts) > 1 && $last['success']) {
+        $GLOBALS['bm_dl_transport_pref'] = $last['transport'];
+    }
+
+    return $last;
 }
 
 /**
@@ -429,6 +537,11 @@ function bm_dl_response_info($response) {
         if ($code === 401) {
             $parts[] = 'هاست دانلود یوزر/رمز را نپذیرفت (config.php هر دو هاست باید یکی باشد)';
         }
+        if (!empty($response['transport']) && $response['transport'] === 'wrapped') {
+            $parts[] = 'ارسال بسته‌بندی‌شده (WAF هاست دانلود فرم ساده را رد کرد)';
+        } elseif (!empty($response['transport']) && $response['transport'] === 'multipart' && !empty($response['attempts']) && strpos((string) $response['attempts'], '←') !== false) {
+            $parts[] = 'ارسال multipart (قالب‌های دیگر رد شد)';
+        }
         $info['summary'] = implode(' | ', $parts);
         return $info;
     }
@@ -444,6 +557,11 @@ function bm_dl_response_info($response) {
         $summary .= ' | اتصال به هاست دانلود برقرار نشد';
     } elseif ($code === 401) {
         $summary .= ' | هاست دانلود یوزر/رمز را نپذیرفت (config.php هر دو هاست باید یکی باشد)';
+    } elseif (bm_response_blocked_by_server($code, $body)) {
+        $summary .= ' | وب‌سرور/فایروال هاست دانلود درخواست را رد کرد (به PHP نرسید) — bot/dl-repair.php?probe=1 را باز کنید';
+    }
+    if (!empty($response['attempts']) && strpos((string) $response['attempts'], '←') !== false) {
+        $summary .= ' | تلاش‌ها: ' . $response['attempts'];
     }
     if ($info['ok'] && stripos($body, 'Failed to write tags') !== false) {
         // music.php قدیمی: دانلود از مبدأ ناموفق بوده و getID3 روی فایل ناموجود خطا داده، ولی کد 200 برگشته

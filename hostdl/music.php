@@ -16,6 +16,7 @@
  * عیب‌یابی (GET با همان یوزر/رمز):
  *   music.php?ping=1                → وضعیت PHP/cURL/فضای دیسک/قابل‌نوشتن بودن پوشه + تست اتصال به سایت مبدأ
  *   music.php?ping=1&test=URL_FILE  → یک دانلود آزمایشی از همان آدرس و گزارش کد HTTP / حجم / خطا
+ *   POST با فیلد probe=1            → فقط تأیید رسیدن درخواست به PHP (فیلدهای دریافتی، IP فرستنده، بسته‌بندی‌شده یا نه)؛ کاری نمی‌کند
  *
  * دسترسی فقط با یوزر/رمز تعریف‌شده در config.php (HTTP Basic Auth)
  * وابستگی: common.php (همین پوشه؛ نسخه‌ی هم‌زمان با این فایل) + پوشه‌ی getid3
@@ -47,6 +48,9 @@ if (isset($_GET['ping'])) {
     $info = [
         'ok'              => true,
         'time'            => date('c'),
+        'client_ip'       => (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
+        'user_agent'      => (string) ($_SERVER['HTTP_USER_AGENT'] ?? ''),
+        'method'          => (string) ($_SERVER['REQUEST_METHOD'] ?? ''),
         'php'             => PHP_VERSION,
         'curl'            => function_exists('curl_init') ? (string) (curl_version()['version'] ?? 'yes') : 'NO',
         'allow_url_fopen' => (bool) ini_get('allow_url_fopen'),
@@ -102,6 +106,21 @@ if (isset($_GET['ping'])) {
     }
 
     pz_json($info);
+}
+
+/* -------------------------------------------------------
+ |  probe: فقط تأیید رسیدن درخواست (برای bot/dl-repair.php?probe=1)
+ * ------------------------------------------------------ */
+if (pz_post('probe') !== '') {
+    pz_json([
+        'ok'         => true,
+        'probe'      => true,
+        'wrapped'    => pz_payload_was_wrapped(),
+        'fields'     => array_values(array_diff(array_keys($_POST), ['probe'])),
+        'client_ip'  => (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
+        'user_agent' => (string) ($_SERVER['HTTP_USER_AGENT'] ?? ''),
+        'php'        => PHP_VERSION,
+    ]);
 }
 
 /* -------------------------------------------------------

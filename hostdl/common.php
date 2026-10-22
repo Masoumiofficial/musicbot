@@ -1,9 +1,13 @@
 <?php
 /**
- * توابع مشترک گیرنده‌های پست‌ساز روی هاست دانلود (video.php ، album.php ، leech.php)
+ * توابع مشترک گیرنده‌های هاست دانلود (music.php ، video.php ، album.php ، leech.php)
  *
  * هر گیرنده اول config.php و auth.php را بارگذاری و bm_require_auth() را اجرا می‌کند، بعد این فایل را.
  * پاسخ همه‌ی گیرنده‌ها JSON است: {"ok": true|false, ...}
+ *
+ * ارسال بسته‌بندی‌شده: اگر فرم با یک فیلد bm_payload (base64url از JSON) رسیده باشد — سایت وقتی WAF این هاست فرم معمولی
+ * را به‌خاطر لینک‌های خارجی رد می‌کند از این قالب استفاده می‌کند — همین‌جا باز و در $_POST گذاشته می‌شود؛
+ * بقیه‌ی گیرنده فرقی نمی‌بیند.
  */
 
 if (!function_exists('bm_require_auth')) {
@@ -14,6 +18,35 @@ if (!function_exists('bm_require_auth')) {
 if (!defined('PZ_BRAND')) {
     define('PZ_BRAND', isset($dl_brand) && $dl_brand !== '' ? (string) $dl_brand : '[ AhangBan.ir ]');
 }
+
+/** آیا فیلدهای این درخواست بسته‌بندی‌شده (bm_payload) رسیده‌اند؟ */
+function pz_payload_was_wrapped() {
+    return !empty($GLOBALS['pz_payload_wrapped']);
+}
+
+/** باز کردن bm_payload در $_POST (یک بار، هنگام بارگذاری این فایل) */
+function pz_unwrap_payload() {
+    $GLOBALS['pz_payload_wrapped'] = false;
+    if (!isset($_POST['bm_payload']) || !is_string($_POST['bm_payload']) || $_POST['bm_payload'] === '') {
+        return;
+    }
+    $raw = strtr($_POST['bm_payload'], '-_', '+/');
+    $raw .= str_repeat('=', (4 - strlen($raw) % 4) % 4);
+    $json = base64_decode($raw, true);
+    $data = $json !== false ? json_decode($json, true) : null;
+    if (!is_array($data)) {
+        return;
+    }
+    // همان تبدیلی که PHP برای فرم معمولی انجام می‌دهد (کلیدهای a[b] به آرایه‌ی تو در تو)
+    parse_str(http_build_query($data, '', '&'), $parsed);
+    foreach ($parsed as $key => $value) {
+        $_POST[$key] = $value;
+    }
+    unset($_POST['bm_payload'], $_POST['bm_payload_v']);
+    $_REQUEST = array_merge($_GET, $_POST);
+    $GLOBALS['pz_payload_wrapped'] = true;
+}
+pz_unwrap_payload();
 
 /** آماده‌سازی اجرا برای انتقال‌های طولانی */
 function pz_prepare_runtime() {

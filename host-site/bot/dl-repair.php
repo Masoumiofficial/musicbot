@@ -6,6 +6,8 @@
  *   /bot/dl-repair.php?days=3&limit=80      بازه‌ی بررسی (پیش‌فرض ۳ روز / ۸۰ پست؛ هم منتشرشده هم پیش‌نویس)
  *   /bot/dl-repair.php?ping=1[&test=URL]    اجرای music.php?ping=1 روی هاست دانلود از طرف سرور سایت (با یوزر/رمز) و نمایش نتیجه
  *                                           test = آدرس یک فایل mp3 مبدأ؛ هاست دانلود همان را آزمایشی دانلود می‌کند و کد/حجم/خطا را می‌گوید
+ *   /bot/dl-repair.php?probe=1              تشخیص مسدودسازی: چند درخواست با شکل‌های مختلف (بدون/با User-Agent، GET/POST، با لینک خارجی،
+ *                                           بسته‌بندی‌شده) به music.php می‌فرستد و می‌گوید وب‌سرور/WAF هاست دانلود کدام را رد می‌کند
  *   دکمه‌ی «انتقال دوباره»                  فایل‌های پست‌های انتخاب‌شده دوباره به music.php فرستاده می‌شود؛ اگر پست به‌خاطر همین خطا
  *                                           پیش‌نویس مانده بود و انتقال موفق شد، منتشر می‌شود
  *
@@ -62,7 +64,8 @@ function dlr_head($url) {
         CURLOPT_TIMEOUT        => 30,
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_USERAGENT      => 'AhangBan-Repair/1.0',
+        CURLOPT_USERAGENT      => bm_http_user_agent(),
+        CURLOPT_HTTPHEADER     => bm_http_headers(),
     ]);
     curl_exec($ch);
     $code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -76,25 +79,80 @@ function dlr_head($url) {
     return ['code' => $code, 'size' => max(0, $size), 'error' => $error];
 }
 
-/** یک درخواست GET با Basic Auth (برای music.php?ping=1) */
-function dlr_get_auth($url, $userpwd, $timeout = 120) {
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
+/**
+ * یک درخواست خام به هاست دانلود (برای ping و probe)
+ * $o: method (GET|POST)، fields (آرایه = multipart، رشته = urlencoded، null = بدون بدنه)، ua (رشته؛ '' = بدون User-Agent)،
+ *     headers (آرایه)، userpwd، timeout
+ * خروجی: code, body, error, errno, type (Content-Type پاسخ)
+ */
+function dlr_raw_request($url, array $o = []) {
+    $ch      = curl_init($url);
+    $options = [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_CONNECTTIMEOUT => 20,
-        CURLOPT_TIMEOUT        => $timeout,
+        CURLOPT_TIMEOUT        => isset($o['timeout']) ? (int) $o['timeout'] : 120,
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_HTTPAUTH       => CURLAUTH_BASIC,
-        CURLOPT_USERPWD        => $userpwd,
-    ]);
+    ];
+    if (!empty($o['userpwd'])) {
+        $options[CURLOPT_HTTPAUTH] = CURLAUTH_BASIC;
+        $options[CURLOPT_USERPWD]  = (string) $o['userpwd'];
+    }
+    if (isset($o['ua']) && $o['ua'] !== '') {
+        $options[CURLOPT_USERAGENT] = (string) $o['ua'];
+    }
+    if (!empty($o['headers'])) {
+        $options[CURLOPT_HTTPHEADER] = (array) $o['headers'];
+    }
+    if (isset($o['method']) && $o['method'] === 'POST') {
+        $options[CURLOPT_POST]       = true;
+        $options[CURLOPT_POSTFIELDS] = isset($o['fields']) ? $o['fields'] : '';
+    }
+    curl_setopt_array($ch, $options);
     $body  = curl_exec($ch);
     $code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $type  = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
     $error = curl_error($ch);
+    $errno = curl_errno($ch);
     if (PHP_VERSION_ID < 80000) {
         curl_close($ch);
     }
-    return ['code' => $code, 'body' => (string) $body, 'error' => $error];
+    return ['code' => $code, 'body' => (string) $body, 'error' => $error, 'errno' => $errno, 'type' => $type];
+}
+
+/** یک درخواست GET با Basic Auth (برای music.php?ping=1) — با همان هدرهای ربات */
+function dlr_get_auth($url, $userpwd, $timeout = 120) {
+    return dlr_raw_request($url, ['userpwd' => $userpwd, 'timeout' => $timeout, 'ua' => bm_http_user_agent(), 'headers' => bm_http_headers()]);
+}
+
+/**
+ * تفسیر پاسخ یک درخواست probe: به PHP رسید یا وب‌سرور/WAF رد کرد؟
+ * خروجی: ['reached' => bool|null, 'label' => متن کوتاه, 'json' => array|null]
+ */
+function dlr_probe_verdict(array $r) {
+    $code = (int) $r['code'];
+    $body = (string) $r['body'];
+    $json = json_decode(trim($body), true);
+    if ($code === 0) {
+        return ['reached' => null, 'label' => 'اتصال برقرار نشد: ' . $r['error'], 'json' => null];
+    }
+    if (is_array($json)) {
+        if (!empty($json['probe']) || (isset($json['ok']) && $json['ok'] && isset($json['php']))) {
+            return ['reached' => true, 'label' => 'رسید به PHP ✓ (HTTP ' . $code . ')', 'json' => $json];
+        }
+        return ['reached' => true, 'label' => 'رسید به PHP ✓ (HTTP ' . $code . ': ' . (isset($json['error']) ? mb_substr((string) $json['error'], 0, 80) : 'JSON') . ')', 'json' => $json];
+    }
+    if ($code === 401) {
+        return ['reached' => true, 'label' => 'رسید به PHP ولی یوزر/رمز رد شد (401)', 'json' => null];
+    }
+    if ($code === 404) {
+        return ['reached' => false, 'label' => 'music.php پیدا نشد (404)', 'json' => null];
+    }
+    if (bm_response_blocked_by_server($code, $body)) {
+        return ['reached' => false, 'label' => 'وب‌سرور/WAF رد کرد ✗ (HTTP ' . $code . ')', 'json' => null];
+    }
+    $text = mb_substr(trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags($body))), 0, 100);
+    return ['reached' => $code < 400 ? true : false, 'label' => 'HTTP ' . $code . ($text !== '' ? ': ' . $text : ''), 'json' => null];
 }
 
 /** لینک صفحه‌ی مبدأ پست: متای _bm_source_url یا جدول wp_subcheck */
@@ -259,7 +317,7 @@ function dlr_repair_post($post_id, $manual_source) {
 /* -------------------------------------------------------
  |  خروجی HTML
  * ------------------------------------------------------ */
-$self = esc_url(remove_query_arg(['ping', 'test']));
+$self = esc_url(remove_query_arg(['ping', 'test', 'probe']));
 ?><!doctype html>
 <html lang="fa" dir="rtl">
 <head>
@@ -290,6 +348,7 @@ ul.report{margin:4px 0 0 0;padding-right:18px}
   <div class="toolbar">
     <a class="btn gray" href="<?php echo $self; ?>">فهرست پست‌ها</a>
     <a class="btn gray" href="<?php echo esc_url(add_query_arg(['ping' => 1], $self)); ?>">تست هاست دانلود (ping)</a>
+    <a class="btn gray" href="<?php echo esc_url(add_query_arg(['probe' => 1, 'check' => 0], $self)); ?>">تشخیص مسدودسازی (probe)</a>
     <form method="get" style="display:flex;gap:6px;align-items:center" action="<?php echo esc_url(strtok($self, '?')); ?>">
       <input type="hidden" name="ping" value="1">
       <input type="text" name="test" placeholder="https://.../file.mp3  (دانلود آزمایشی روی هاست دانلود)" style="width:420px" value="<?php echo dlr_h($_GET['test'] ?? ''); ?>">
@@ -345,6 +404,91 @@ if (isset($_GET['ping'])) {
     } else {
         echo '<p class="bad">پاسخ JSON نیست — یعنی music.php روی هاست دانلود هنوز نسخه‌ی قدیمی است (نسخه‌ی ۲ را از hostdl/music.php و hostdl/common.php بگذارید) یا خطای دیگری داده:</p>';
         echo '<pre>' . dlr_h(mb_substr(strip_tags($r['body']), 0, 2000)) . '</pre>';
+    }
+    echo '</div>';
+}
+
+/* ---------- probe: چه شکلی از درخواست را هاست دانلود رد می‌کند؟ ---------- */
+if (isset($_GET['probe'])) {
+    $ping_url = $functions_dl_music . (strpos($functions_dl_music, '?') === false ? '?' : '&') . 'ping=1';
+    $plain    = ['probe' => '1', 'artist_en' => 'Probe Artist', 'song_en' => 'Probe Song', 'mp3_name' => 'Probe Artist - Probe Song', 'dir_file' => 'music/p/probe-artist'];
+    $with_url = $plain + ['music320' => 'https://example.com/files/Probe%20Artist%20-%20Probe%20Song%20%5B320%5D.mp3', 'music128' => 'https://example.com/files/probe-128.mp3', 'image' => 'https://example.com/img/probe.jpg'];
+    $ua       = bm_http_user_agent();
+    $hdr      = bm_http_headers();
+    $wrapped  = http_build_query(bm_wrap_payload($with_url), '', '&');
+
+    $urlenc_hdr = array_merge($hdr, ['Content-Type: application/x-www-form-urlencoded; charset=UTF-8']);
+    $variants = [
+        'old'       => ['title' => 'شکل قدیمی ربات: POST multipart (شبیه آپلود فایل) با لینک‌های خارجی، بدون User-Agent', 'o' => ['method' => 'POST', 'fields' => $with_url, 'ua' => '']],
+        'get_noua'  => ['title' => 'GET ping بدون User-Agent', 'url' => $ping_url, 'o' => ['method' => 'GET', 'ua' => '']],
+        'get_ua'    => ['title' => 'GET ping با User-Agent مرورگر', 'url' => $ping_url, 'o' => ['method' => 'GET', 'ua' => $ua, 'headers' => $hdr]],
+        'multipart' => ['title' => 'POST multipart بدون لینک خارجی، با User-Agent', 'o' => ['method' => 'POST', 'fields' => $plain, 'ua' => $ua, 'headers' => $hdr]],
+        'form'      => ['title' => 'POST فرم ساده (urlencoded) با لینک‌های خارجی، با User-Agent — شکل جدید ربات', 'o' => ['method' => 'POST', 'fields' => http_build_query($with_url, '', '&'), 'ua' => $ua, 'headers' => $urlenc_hdr]],
+        'wrapped'   => ['title' => 'POST بسته‌بندی‌شده (bm_payload) با User-Agent', 'o' => ['method' => 'POST', 'fields' => $wrapped, 'ua' => $ua, 'headers' => $urlenc_hdr]],
+    ];
+
+    $verdicts  = [];
+    $client_ip = '';
+    echo '<div class="box"><h2>تشخیص مسدودسازی — ' . dlr_h($functions_dl_music) . '</h2>';
+    if ($dl_userpwd === '') {
+        echo '<p class="bad">یوزر/رمز اتصال به هاست دانلود در دسترس نیست.</p>';
+    } else {
+        echo '<table><tr><th style="width:45%">شکل درخواست</th><th>نتیجه</th></tr>';
+        foreach ($variants as $key => $v) {
+            $o            = $v['o'] + ['userpwd' => $dl_userpwd, 'timeout' => 60];
+            $r            = dlr_raw_request(isset($v['url']) ? $v['url'] : $functions_dl_music, $o);
+            $verdict      = dlr_probe_verdict($r);
+            $verdicts[$key] = $verdict;
+            if ($client_ip === '' && is_array($verdict['json']) && !empty($verdict['json']['client_ip'])) {
+                $client_ip = (string) $verdict['json']['client_ip'];
+            }
+            $extra = '';
+            if (is_array($verdict['json']) && array_key_exists('wrapped', $verdict['json'])) {
+                $extra = $verdict['json']['wrapped'] ? ' — بسته‌بندی باز شد' : '';
+            }
+            if ($verdict['reached'] === false && $verdict['json'] === null) {
+                $extra = '<br><small class="muted">' . dlr_h(mb_substr(trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags($r['body']))), 0, 120)) . '</small>';
+            }
+            echo '<tr><td>' . dlr_h($v['title']) . '</td><td><span class="' . ($verdict['reached'] === true ? 'ok' : ($verdict['reached'] === false ? 'bad' : 'warn')) . '">' . dlr_h($verdict['label']) . '</span>' . $extra . '</td></tr>';
+        }
+        echo '</table>';
+
+        $ok = function ($k) use ($verdicts) {
+            return isset($verdicts[$k]) && $verdicts[$k]['reached'] === true;
+        };
+        $blocked = function ($k) use ($verdicts) {
+            return isset($verdicts[$k]) && $verdicts[$k]['reached'] === false;
+        };
+        $wrapped_supported = isset($verdicts['wrapped']['json']['wrapped']) && $verdicts['wrapped']['json']['wrapped'] === true;
+
+        echo '<h2 style="margin-top:14px">نتیجه‌گیری</h2><ul class="report">';
+        if ($client_ip !== '') {
+            echo '<li>IP سرور سایت از دید هاست دانلود: <code>' . dlr_h($client_ip) . '</code> (اگر لازم شد همین را به پشتیبانی هاست دانلود بدهید تا آزاد کند)</li>';
+        }
+        if ($verdicts['old']['reached'] === null) {
+            echo '<li class="bad">سرور سایت اصلاً به هاست دانلود وصل نمی‌شود (فایروال/DNS) — با پشتیبانی هاست دانلود (یا سایت) مطرح کنید.</li>';
+        } elseif ($ok('form')) {
+            $why = '';
+            if ($blocked('old') && $blocked('multipart')) {
+                $why = ' هاست دانلود درخواست‌های multipart (شکل آپلود فایل — همان چیزی که به‌خاطر آسیب‌پذیری PHP2Shell بسته‌اند) را 403 می‌کند؛ ربات قبلی با همین قالب می‌فرستاد. script.php جدید فرم ساده می‌فرستد و این قالب می‌رسد؛ مشکل حل است.';
+            } elseif ($blocked('old') && $ok('multipart')) {
+                $why = ' فقط درخواست بدون User-Agent رد می‌شود؛ script.php جدید User-Agent می‌فرستد؛ مشکل حل است.';
+            } else {
+                $why = ' الان مسدودسازی‌ای نیست.';
+            }
+            echo '<li class="ok">شکل جدید ربات (فرم ساده با User-Agent) به PHP می‌رسد.' . $why . ' از فهرست پست‌ها «انتقال دوباره» را بزنید.</li>';
+        } elseif ($blocked('form') && $wrapped_supported) {
+            echo '<li class="warn">WAF هاست دانلود فرم‌هایی را که لینک خارجی دارند رد می‌کند (قانون RFI)' . ($ok('multipart') ? '' : ' و multipart را هم') . '. ارسال بسته‌بندی‌شده می‌رسد و باز می‌شود؛ ربات در حالت auto خودش به آن می‌افتد. برای یک درخواست کمتر، در bot/config.php بگذارید: <code>$bot_dl_transport = \'wrapped\';</code></li>';
+        } elseif ($blocked('form') && $ok('multipart') && !$wrapped_supported) {
+            echo '<li class="bad">WAF هاست دانلود فرم‌هایی را که لینک خارجی دارند رد می‌کند و common.php روی هاست دانلود هنوز بسته‌بندی را باز نمی‌کند — hostdl/common.php و hostdl/music.php جدید را آپلود کنید و دوباره probe بگیرید.</li>';
+        } elseif ($blocked('form') && $blocked('multipart') && ($ok('get_ua') || $ok('get_noua'))) {
+            echo '<li class="bad">GET می‌رسد ولی هر POST به PHP رد می‌شود. این کار WAF/ModSecurity هاست دانلود است؛ از پشتیبانی هاست دانلود بخواهید درخواست‌های POST از IP بالا به music.php را آزاد کنند (یا بگویند دقیقاً چه قالبی مجاز است).</li>';
+        } elseif ($blocked('get_ua') && $blocked('get_noua')) {
+            echo '<li class="bad">هر درخواستی از سرور سایت به music.php رد می‌شود (حتی GET ساده) ولی فایل‌های استاتیک پاسخ می‌دهند؛ یعنی IP سرور سایت برای اجرای PHP روی هاست دانلود مسدود شده (فایروال، ModSecurity/Imunify، یا قانون deny در nginx). راه حل فقط دست پشتیبانی هاست دانلود است: «درخواست‌های IP ' . dlr_h($client_ip !== '' ? $client_ip : 'سرور سایت') . ' به dl.ahangban.ir/music.php با 403 رد می‌شود، لطفاً آزاد شود». تا آن موقع می‌توانید music.php?ping=1 را در مرورگر خودتان باز کنید تا ببینید از IP شما کار می‌کند.</li>';
+        } else {
+            echo '<li class="warn">الگوی مشخصی درنیامد؛ جدول بالا را برای پشتیبانی هاست دانلود بفرستید.</li>';
+        }
+        echo '</ul>';
     }
     echo '</div>';
 }
