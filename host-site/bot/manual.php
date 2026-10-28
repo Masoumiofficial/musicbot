@@ -13,6 +13,11 @@ if (!empty($_POST['link'])) {
 
     if (filter_var($postUrl, FILTER_VALIDATE_URL)) {
         $bot_source = 'manual'; // ارسال دستی (robo.php و آرشیو هنرمندان) → دانلود آهنگ + آثار منتخب
+
+        // same_title=1 → اگر پستی با همین عنوان (ولی لینک مبدأ دیگر) وجود داشت، به جای رد شدن با شماره ثبت شود
+        // («ساز و آواز (2)»). همان لینک مبدأ در هر حالت رد می‌شود.
+        $bm_same_title = !empty($_POST['same_title']) && $_POST['same_title'] !== '0' ? 'number' : 'skip';
+
         include('script.php');
 
         $permalink = rawurlencode(get_permalink($post_id));

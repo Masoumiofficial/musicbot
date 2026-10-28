@@ -7,6 +7,8 @@ global $wpdb;
 
 // توابع احراز هویت (برای ارسال یوزر/رمز به هاست دانلود)؛ خودِ بررسی ورود در manual.php / auto.php انجام می‌شود
 require_once __DIR__ . '/auth.php';
+// لوگوی سایت روی کاور (تنظیمات $bot_watermark_* در config.php)
+require_once __DIR__ . '/watermark.php';
 
 $dir_wp = date('Y/m');
 
@@ -332,7 +334,9 @@ function bm_curl_post_json($url, array $payload, $timeout = 30) {
     $errno    = curl_errno($ch);
     $code     = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
-    curl_close($ch);
+    if (PHP_VERSION_ID < 80000) {
+        curl_close($ch); // از PHP 8 بی‌اثر و در 8.5 منسوخ است
+    }
 
     return [
         'success'  => ($errno === 0 && $code >= 200 && $code < 300 && !empty($response)),
@@ -343,52 +347,239 @@ function bm_curl_post_json($url, array $payload, $timeout = 30) {
     ];
 }
 
+/** User-Agent مرورگر برای تماس با هاست دانلود؛ nginx/WAF خیلی از هاست‌ها درخواست بدون User-Agent را 403 می‌کند */
+function bm_http_user_agent() {
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 AhangBan-Bot';
+}
+
+/** هدرهای عمومی هر درخواست به هاست دانلود (Expect خالی = بدون 100-continue که بعضی پراکسی‌ها خراب می‌کنند) */
+function bm_http_headers(array $extra = []) {
+    return array_merge([
+        'Accept: application/json, text/html;q=0.9, */*;q=0.8',
+        'Accept-Language: fa,en;q=0.8',
+        'Expect:',
+    ], $extra);
+}
+
 /**
- * درخواست POST فرم‌دیتا با cURL
- * $userpwd = «user:pass» برای HTTP Basic Auth (خالی = بدون احراز هویت)
+ * بسته‌بندی فیلدهای فرم در یک فیلد (bm_payload = base64url(JSON))
+ * وقتی WAF هاست دانلود (ModSecurity / Imunify360 و ...) فیلدهایی را که لینک خارجی دارند به‌عنوان «RFI» با 403 رد می‌کند،
+ * همان داده‌ها در این قالب رد می‌شود؛ common.php روی هاست دانلود آن را باز می‌کند و در $_POST می‌گذارد.
  */
-function bm_curl_post_form($url, array $payload, $timeout = 120, $userpwd = '') {
+function bm_wrap_payload(array $payload) {
+    $json = wp_json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    return ['bm_payload' => rtrim(strtr(base64_encode($json), '+/', '-_'), '='), 'bm_payload_v' => '1'];
+}
+
+/**
+ * آیا پاسخ، صفحه‌ی خطای خود وب‌سرور/WAF است (نه خروجی اسکریپت گیرنده)؟
+ * مثل «403 Forbidden nginx» — در این حالت ارسال با قالب دیگر امتحان می‌شود
+ */
+function bm_response_blocked_by_server($code, $body) {
+    $code = (int) $code;
+    $body = (string) $body;
+    if ($code === 0) {
+        return false; // خطای اتصال؛ قالب ارسال ربطی ندارد
+    }
+    $trimmed = ltrim($body);
+    $is_json = $trimmed !== '' && ($trimmed[0] === '{' || $trimmed[0] === '[');
+    if ($is_json) {
+        return false;
+    }
+    if (in_array($code, [403, 406, 409, 412, 418, 429, 501], true)) {
+        return true;
+    }
+    return $code >= 400 && (stripos($body, 'Forbidden') !== false || stripos($body, 'Not Acceptable') !== false || stripos($body, 'Mod_Security') !== false || stripos($body, 'ModSecurity') !== false);
+}
+
+/**
+ * درخواست POST فرم با cURL به گیرنده‌های هاست دانلود
+ * $userpwd = «user:pass» برای HTTP Basic Auth (خالی = بدون احراز هویت)
+ * $transport (قالب بدنه‌ی درخواست):
+ *   'form'      = application/x-www-form-urlencoded — فرم ساده؛ همان $_POST در گیرنده (با music.php قدیمی هم کار می‌کند)
+ *   'wrapped'   = همان فیلدها در یک فیلد bm_payload (base64url از JSON) — برای وقتی WAF لینک‌های داخل فرم را رد می‌کند
+ *   'multipart' = multipart/form-data — قالب قدیمی ربات؛ شبیه «آپلود فایل» است و بعد از آسیب‌پذیری PHP2Shell
+ *                 (CVE-2026-109618/109619، مهر ۱۴۰۵) خیلی از هاست‌ها آن را در وب‌سرور با 403 رد می‌کنند
+ *   'auto' (پیش‌فرض) = form ← اگر وب‌سرور/WAF رد کرد wrapped ← اگر باز هم رد کرد multipart
+ * خروجی: success, error, code, body, transport (قالبی که جواب از آن آمده), attempts (گزارش کوتاه تلاش‌ها)
+ */
+function bm_curl_post_form($url, array $payload, $timeout = 120, $userpwd = '', $transport = '') {
     if (empty($url)) {
         return [
-            'success' => false,
-            'error'   => 'Download endpoint is empty.',
-            'code'    => 0,
-            'body'    => '',
+            'success'   => false,
+            'error'     => 'Download endpoint is empty.',
+            'code'      => 0,
+            'body'      => '',
+            'transport' => '',
+            'attempts'  => '',
         ];
     }
 
-    $ch = curl_init($url);
-
-    $options = [
-        CURLOPT_POST           => true,
-        CURLOPT_POSTFIELDS     => $payload,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CONNECTTIMEOUT => 20,
-        CURLOPT_TIMEOUT        => $timeout,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false,
-    ];
-
-    if ($userpwd !== '') {
-        $options[CURLOPT_HTTPAUTH] = CURLAUTH_BASIC;
-        $options[CURLOPT_USERPWD]  = $userpwd;
+    if ($transport === '') {
+        $transport = isset($GLOBALS['bot_dl_transport']) ? (string) $GLOBALS['bot_dl_transport'] : 'auto';
+    }
+    if (!in_array($transport, ['auto', 'form', 'wrapped', 'multipart'], true)) {
+        $transport = 'auto';
     }
 
-    curl_setopt_array($ch, $options);
+    // اگر در همین اجرا قالبی رد شده و قالب دیگری جواب داده، از همان ادامه می‌دهیم
+    if ($transport === 'auto' && !empty($GLOBALS['bm_dl_transport_pref'])) {
+        $transport = (string) $GLOBALS['bm_dl_transport_pref'];
+    }
 
-    $body  = curl_exec($ch);
-    $error = curl_error($ch);
-    $errno = curl_errno($ch);
-    $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    // فایل پیوست (CURLFile) فقط با multipart می‌رود
+    foreach ($payload as $value) {
+        if (is_object($value)) {
+            $transport = 'multipart';
+            break;
+        }
+    }
 
-    curl_close($ch);
+    $order    = $transport === 'auto' ? ['form', 'wrapped', 'multipart'] : [$transport];
+    $attempts = [];
+    $last     = null;
+    $names    = ['form' => 'فرم ساده', 'wrapped' => 'بسته‌بندی‌شده', 'multipart' => 'multipart'];
 
-    return [
-        'success' => ($errno === 0 && $code >= 200 && $code < 300),
-        'error'   => $error,
-        'code'    => $code,
-        'body'    => $body,
-    ];
+    foreach ($order as $mode) {
+        $ch      = curl_init($url);
+        $headers = bm_http_headers();
+        if ($mode === 'wrapped') {
+            $fields    = http_build_query(bm_wrap_payload($payload), '', '&');
+            $headers[] = 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8';
+        } elseif ($mode === 'form') {
+            $fields    = http_build_query($payload, '', '&');
+            $headers[] = 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8';
+        } else {
+            $fields = $payload; // multipart/form-data
+        }
+
+        $options = [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $fields,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 20,
+            CURLOPT_TIMEOUT        => $timeout,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_USERAGENT      => bm_http_user_agent(),
+            CURLOPT_HTTPHEADER     => $headers,
+        ];
+
+        if ($userpwd !== '') {
+            $options[CURLOPT_HTTPAUTH] = CURLAUTH_BASIC;
+            $options[CURLOPT_USERPWD]  = $userpwd;
+        }
+
+        curl_setopt_array($ch, $options);
+
+        $body  = curl_exec($ch);
+        $error = curl_error($ch);
+        $errno = curl_errno($ch);
+        $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        if (PHP_VERSION_ID < 80000) {
+            curl_close($ch); // از PHP 8 بی‌اثر و در 8.5 منسوخ است
+        }
+
+        $last = [
+            'success'   => ($errno === 0 && $code >= 200 && $code < 300),
+            'error'     => $error,
+            'code'      => $code,
+            'body'      => (string) $body,
+            'transport' => $mode,
+            'attempts'  => '',
+        ];
+        $attempts[] = $names[$mode] . ': ' . ($errno !== 0 ? 'cURL ' . $error : 'HTTP ' . (int) $code);
+
+        if ($last['success'] || !bm_response_blocked_by_server($code, $body) || count($order) === 1) {
+            break;
+        }
+        // وب‌سرور/WAF رد کرد؛ قالب بعدی
+    }
+
+    $last['attempts'] = implode(' ← ', $attempts);
+    if ($transport === 'auto' && count($attempts) > 1 && $last['success']) {
+        $GLOBALS['bm_dl_transport_pref'] = $last['transport'];
+    }
+
+    return $last;
+}
+
+/**
+ * تفسیر پاسخ هاست دانلود (music.php)
+ * نسخه‌ی ۲ music.php پاسخ JSON می‌دهد: {"ok": bool, "files": [{quality, name, ok, size, http, error, tags}], "error": "..."}
+ * نسخه‌ی قدیمی متن HTML برمی‌گرداند و حتی وقتی فایل دانلود نشده کد 200 می‌دهد؛ این‌جا هر دو را می‌فهمیم.
+ * خروجی: ['ok' => bool, 'summary' => متن گزارش, 'files' => [], 'json' => array|null]
+ */
+function bm_dl_response_info($response) {
+    $info = ['ok' => false, 'summary' => '', 'files' => [], 'json' => null];
+    if (!is_array($response)) {
+        return $info;
+    }
+    $body = isset($response['body']) ? (string) $response['body'] : '';
+    $code = isset($response['code']) ? (int) $response['code'] : 0;
+    $json = json_decode(trim($body), true);
+
+    if (is_array($json) && array_key_exists('ok', $json)) {
+        $info['json']  = $json;
+        $info['ok']    = !empty($json['ok']) && !empty($response['success']);
+        $info['files'] = isset($json['files']) && is_array($json['files']) ? $json['files'] : [];
+        $parts = [];
+        foreach ($info['files'] as $file) {
+            $quality = isset($file['quality']) ? (string) $file['quality'] : '?';
+            if (!empty($file['ok'])) {
+                $parts[] = "[{$quality}] منتقل شد (" . size_format((int) $file['size']) . ')' . (!empty($file['tags']) ? ' — ' . $file['tags'] : '');
+            } else {
+                $parts[] = "[{$quality}] ناموفق: " . (isset($file['error']) ? (string) $file['error'] : 'نامشخص');
+            }
+        }
+        if (empty($parts)) {
+            $parts[] = !empty($json['error']) ? (string) $json['error'] : ('HTTP ' . $code);
+        }
+        // کاور داخل فایل‌ها (music.php نسخه‌ی ۳ نتیجه‌ی لوگو را در cover.watermark می‌فرستد)
+        if (!empty($json['cover']['watermark']) && is_array($json['cover']['watermark'])) {
+            $wm      = $json['cover']['watermark'];
+            $parts[] = 'کاور داخل فایل: ' . (isset($wm['note']) && $wm['note'] !== '' ? (string) $wm['note'] : (!empty($wm['ok']) ? 'لوگو نشست' : 'لوگو ننشست'));
+        }
+        if ($code === 401) {
+            $parts[] = 'هاست دانلود یوزر/رمز را نپذیرفت (config.php هر دو هاست باید یکی باشد)';
+        }
+        if (!empty($response['transport']) && $response['transport'] === 'wrapped') {
+            $parts[] = 'ارسال بسته‌بندی‌شده (WAF هاست دانلود فرم ساده را رد کرد)';
+        } elseif (!empty($response['transport']) && $response['transport'] === 'multipart' && !empty($response['attempts']) && strpos((string) $response['attempts'], '←') !== false) {
+            $parts[] = 'ارسال multipart (قالب‌های دیگر رد شد)';
+        }
+        $info['summary'] = implode(' | ', $parts);
+        return $info;
+    }
+
+    // پاسخ غیر JSON (music.php قدیمی یا صفحه‌ی خطا)
+    $info['ok'] = !empty($response['success']);
+    $text       = mb_substr(trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags($body))), 0, 250);
+    $summary    = 'HTTP ' . $code;
+    if (!empty($response['error'])) {
+        $summary .= ' | ' . $response['error'];
+    }
+    if ($code === 0) {
+        $summary .= ' | اتصال به هاست دانلود برقرار نشد';
+    } elseif ($code === 401) {
+        $summary .= ' | هاست دانلود یوزر/رمز را نپذیرفت (config.php هر دو هاست باید یکی باشد)';
+    } elseif (bm_response_blocked_by_server($code, $body)) {
+        $summary .= ' | وب‌سرور/فایروال هاست دانلود درخواست را رد کرد (به PHP نرسید) — bot/dl-repair.php?probe=1 را باز کنید';
+    }
+    if (!empty($response['attempts']) && strpos((string) $response['attempts'], '←') !== false) {
+        $summary .= ' | تلاش‌ها: ' . $response['attempts'];
+    }
+    if ($info['ok'] && stripos($body, 'Failed to write tags') !== false) {
+        // music.php قدیمی: دانلود از مبدأ ناموفق بوده و getID3 روی فایل ناموجود خطا داده، ولی کد 200 برگشته
+        $info['ok'] = false;
+        $summary   .= ' | music.php قدیمی: فایل از مبدأ دانلود نشد (music.php نسخه‌ی ۲ را روی هاست دانلود بگذارید تا علت دقیق گزارش شود)';
+    }
+    if ($text !== '') {
+        $summary .= ' | ' . $text;
+    }
+    $info['summary'] = $summary;
+    return $info;
 }
 
 /**
@@ -406,6 +597,40 @@ function bm_set_term_if_not_empty($post_id, $value, $taxonomy, $append = false) 
     }
 
     wp_set_object_terms($post_id, $value, $taxonomy, $append);
+}
+
+/**
+ * لوگوی سایت روی فایل کاور، قبل از ثبت به‌عنوان تصویر شاخص (bot/watermark.php؛ تنظیمات $bot_watermark_* در config.php)
+ * فایل خروجی کنار فایل ورودی با پسوند .wm.{ext} ساخته و فایل ورودی پاک می‌شود؛ اگر لوگو ننشست (غیرفعال، فایل لوگو نبود،
+ * کاور کوچک بود …) همان فایل ورودی می‌ماند و فقط در note گزارش می‌شود.
+ * خروجی: ['applied' => bool, 'path' => مسیر فایل نهایی, 'note' => متن فارسی برای گزارش, 'result' => خروجی bm_wm_apply یا null, 'stamp' => شناسه‌ی واترمارک]
+ */
+function bm_watermark_cover_file($path, $ext = 'jpg') {
+    $out  = ['applied' => false, 'path' => $path, 'note' => '', 'result' => null, 'stamp' => ''];
+    $opts = bm_wm_options_from_globals('bot');
+    if (empty($opts['enabled'])) {
+        return $out;
+    }
+    $ext = strtolower(preg_replace('/[^a-z0-9]/i', '', (string) $ext));
+    if ($ext === '') {
+        $ext = 'jpg';
+    }
+    if (function_exists('wp_raise_memory_limit')) {
+        wp_raise_memory_limit('image');
+    }
+    $target        = $path . '.wm.' . $ext;
+    $result        = bm_wm_apply($path, $target, $opts);
+    $out['result'] = $result;
+    $out['note']   = bm_wm_describe($result);
+    if (!empty($result['ok']) && empty($result['skipped']) && file_exists($target) && filesize($target) > 0) {
+        @unlink($path);
+        $out['path']    = $target;
+        $out['applied'] = true;
+        $out['stamp']   = isset($result['stamp']) ? (string) $result['stamp'] : bm_wm_stamp($opts);
+    } else {
+        @unlink($target);
+    }
+    return $out;
 }
 
 /**
@@ -505,6 +730,10 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
         }
     }
 
+    // لوگوی سایت روی کاور (قبل از آپلود، تا همه‌ی سایزهای وردپرس از کاور لوگودار ساخته شوند)
+    $watermark = bm_watermark_cover_file($tmp, $file_ext);
+    $tmp       = $watermark['path'];
+
     // نام دقیق فایل نهایی؛ اگر $img_name داده نشده بود از نام اصلی فایل استفاده می‌شود
     $desired_name = !empty($img_name) ? $img_name . '.' . $file_ext : basename($tmp);
 
@@ -544,14 +773,30 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
         update_post_meta($attachment_id, '_wp_attachment_image_alt', sanitize_text_field($alt));
     }
 
+    // نشان «این کاور لوگو دارد» روی اتچمنت (bot/watermark-batch.php همین را می‌بیند و دوباره لوگو نمی‌گذارد)
+    if ($watermark['applied']) {
+        update_post_meta($attachment_id, '_bm_watermark', wp_json_encode([
+            'stamp'      => $watermark['stamp'],
+            'time'       => time(),
+            'logo_width' => isset($watermark['result']['logo_width']) ? (int) $watermark['result']['logo_width'] : 0,
+            'variant'    => isset($watermark['result']['variant']) ? (string) $watermark['result']['variant'] : '',
+            'position'   => isset($watermark['result']['position']) ? (string) $watermark['result']['position'] : '',
+            'plate'      => isset($watermark['result']['plate']) ? (string) $watermark['result']['plate'] : '',
+            'plate_style' => isset($watermark['result']['plate_style']) ? (string) $watermark['result']['plate_style'] : '',
+            'plate_color' => isset($watermark['result']['plate_color']) ? (string) $watermark['result']['plate_color'] : '',
+            'by'         => 'bot',
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
     // ست کردن تصویر شاخص
     $set = set_post_thumbnail($post_id, $attachment_id);
 
     if (!$set) {
         return [
-            'success' => false,
-            'message' => 'اتچمنت ساخته شد ولی تصویر شاخص ثبت نشد.',
-            'id'      => $attachment_id,
+            'success'   => false,
+            'message'   => 'اتچمنت ساخته شد ولی تصویر شاخص ثبت نشد.',
+            'id'        => $attachment_id,
+            'watermark' => $watermark['note'],
         ];
     }
 
@@ -562,9 +807,10 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
         : '';
 
     return [
-        'success' => true,
-        'message' => 'تصویر شاخص با موفقیت ثبت شد' . $dims . '.',
-        'id'      => $attachment_id,
+        'success'   => true,
+        'message'   => 'تصویر شاخص با موفقیت ثبت شد' . $dims . '.' . ($watermark['note'] !== '' ? ' ' . $watermark['note'] . '.' : ''),
+        'id'        => $attachment_id,
+        'watermark' => $watermark['note'],
     ];
 }
 
@@ -601,6 +847,100 @@ function bm_artist_term_slug($artist_en) {
         return '';
     }
     return $slug;
+}
+
+/**
+ * شکل نرمال‌شده‌ی یک نام برای مقایسه: حروف کوچک، بدون فاصله/نیم‌فاصله/خط تیره/نقطه/اعراب،
+ * ي→ی ، ك→ک ، ة→ه.  «محمد رضا شجریان» و «محمدرضا شجریان» و «mohammad-reza-shajarian» یکی می‌شوند
+ */
+function bm_normalize_name($text) {
+    $text = mb_strtolower(bm_clean_text($text), 'UTF-8');
+    $text = str_replace(["\xD9\x8A", "\xD9\x83", "\xD8\xA9"], ["\xDB\x8C", "\xDA\xA9", "\xD9\x87"], $text);
+    $text = preg_replace('/[\x{064B}-\x{0652}\x{0670}\x{0640}]/u', '', $text);
+    $text = preg_replace('/[\s\x{200B}-\x{200F}\-_\.\x{060C},]+/u', '', $text);
+    return (string) $text;
+}
+
+/**
+ * ترم هنرمندی که «عملاً» همین نام است ولی با املای دیگری ثبت شده
+ * (فاصله/نیم‌فاصله یا ي/ك عربی) یا نامک انگلیسی‌اش همین است.
+ * خروجی: شناسه‌ی ترم یا 0
+ */
+function bm_find_similar_artist_term($artist, $slug, $taxonomy) {
+    static $cache = [];
+
+    if ($taxonomy === '' || !function_exists('get_terms')) {
+        return 0;
+    }
+    if (!isset($cache[$taxonomy])) {
+        $cache[$taxonomy] = ['names' => [], 'slugs' => []];
+        $terms = get_terms(['taxonomy' => $taxonomy, 'hide_empty' => false]);
+        if (is_array($terms)) {
+            foreach ($terms as $term) {
+                if (!is_object($term) || empty($term->term_id)) {
+                    continue;
+                }
+                $name_key = bm_normalize_name($term->name);
+                $slug_key = bm_normalize_name($term->slug);
+                if ($name_key !== '' && !isset($cache[$taxonomy]['names'][$name_key])) {
+                    $cache[$taxonomy]['names'][$name_key] = (int) $term->term_id;
+                }
+                if ($slug_key !== '' && !isset($cache[$taxonomy]['slugs'][$slug_key])) {
+                    $cache[$taxonomy]['slugs'][$slug_key] = (int) $term->term_id;
+                }
+            }
+        }
+    }
+
+    $name_key = bm_normalize_name($artist);
+    if ($name_key !== '' && isset($cache[$taxonomy]['names'][$name_key])) {
+        return $cache[$taxonomy]['names'][$name_key];
+    }
+    $slug_key = bm_normalize_name($slug);
+    if ($slug_key !== '' && isset($cache[$taxonomy]['slugs'][$slug_key])) {
+        return $cache[$taxonomy]['slugs'][$slug_key];
+    }
+    return 0;
+}
+
+/** شناسه‌ی پستی با این عنوان (منتشرشده، پیش‌نویس، در انتظار یا زمان‌بندی‌شده) یا 0 */
+function bm_post_id_by_title($title) {
+    global $wpdb;
+    return (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT ID FROM {$wpdb->posts}
+         WHERE post_title = %s
+         AND post_type = 'post'
+         AND post_status IN ('publish', 'draft', 'pending', 'future')
+         ORDER BY ID ASC LIMIT 1",
+        $title
+    ));
+}
+
+/** شناسه‌ی پستی که از همین لینک مبدأ ساخته شده (متای _bm_source_url) یا 0 */
+function bm_post_id_by_source_url($url) {
+    global $wpdb;
+    $url = trim((string) $url);
+    if ($url === '') {
+        return 0;
+    }
+    return (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT p.ID FROM {$wpdb->posts} p
+         INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID
+         WHERE m.meta_key = '_bm_source_url' AND m.meta_value = %s
+         AND p.post_type = 'post'
+         AND p.post_status IN ('publish', 'draft', 'pending', 'future')
+         ORDER BY p.ID ASC LIMIT 1",
+        $url
+    ));
+}
+
+/**
+ * نشانگر ماشین‌خوان نتیجه برای اسکریپت‌های دیگر (آرشیو هنرمندان): در خروجی HTML به شکل کامنت می‌آید
+ * status: ok | exists | error
+ */
+function bm_result_marker($status, array $data = []) {
+    $data = array_merge(['status' => $status], $data);
+    return "\n<!--BM_RESULT " . str_replace('-->', '--\u003e', wp_json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) . " -->\n";
 }
 
 /**
@@ -758,6 +1098,12 @@ function bm_get_singer_term($artist, $artist_en, $taxonomy = '') {
         $term_id = is_array($found) ? (int) $found['term_id'] : (int) $found;
     }
 
+    // اگر نبود: همین هنرمند با املای دیگر («محمد رضا» / «محمدرضا»، ي/ك عربی) یا با همین نامک انگلیسی
+    // ثبت شده؟ از همان ترم استفاده می‌شود تا برای یک خواننده دو آرشیو ساخته نشود
+    if (!$term_id) {
+        $term_id = bm_find_similar_artist_term($artist, $slug, $taxonomy);
+    }
+
     // اگر نبود، با نام فارسی و نامک انگلیسی بساز
     if (!$term_id) {
         $args = ($slug !== '') ? ['slug' => $slug] : [];
@@ -849,22 +1195,20 @@ $api_response = bm_curl_post_json($apiUrl, [
 ]);
 
 if (!$api_response['success']) {
-    exit(
-        'خطا در ارتباط با API. ' .
-        'HTTP: ' . intval($api_response['code']) .
-        ' | cURL: ' . esc_html($api_response['error']) .
-        ' | Response: ' . esc_html(mb_substr((string) $api_response['response'], 0, 500))
-    );
+    $api_fail = 'خطا در ارتباط با API. HTTP: ' . intval($api_response['code'])
+        . ' | cURL: ' . $api_response['error']
+        . ' | Response: ' . mb_substr((string) $api_response['response'], 0, 500);
+    exit(esc_html($api_fail) . bm_result_marker('error', ['reason' => 'api', 'message' => $api_fail]));
 }
 
 $result = json_decode($api_response['response'], true);
 
 if (!is_array($result)) {
-    exit('خطا: پاسخ API معتبر نیست.');
+    exit('خطا: پاسخ API معتبر نیست.' . bm_result_marker('error', ['reason' => 'api', 'message' => 'پاسخ API معتبر نیست']));
 }
 
 if (!empty($result['error'])) {
-    exit('API Error: ' . esc_html($result['error']));
+    exit('API Error: ' . esc_html($result['error']) . bm_result_marker('error', ['reason' => 'api', 'message' => 'API: ' . $result['error']]));
 }
 
 /* -------------------------------------------------------
@@ -900,7 +1244,7 @@ $matnmusic  = trim($result['matnmusic'] ?? '');
  |  3) اعتبارسنجی داده‌های حیاتی
  * ------------------------------------------------------ */
 if ($artist === '' || $song === '') {
-    exit('خطا: نام خواننده یا نام آهنگ از API دریافت نشد.');
+    exit('خطا: نام خواننده یا نام آهنگ از API دریافت نشد.' . bm_result_marker('error', ['reason' => 'api', 'message' => 'نام خواننده یا نام آهنگ از API دریافت نشد']));
 }
 
 if ($artist_en === '') {
@@ -909,6 +1253,54 @@ if ($artist_en === '') {
 
 if ($song_en === '') {
     $song_en = $song;
+}
+
+/* -------------------------------------------------------
+ |  3-1) جلوگیری از پست تکراری
+ |  الف) همین لینک مبدأ قبلاً ثبت شده (متای _bm_source_url) → همیشه رد می‌شود
+ |  ب) عنوان یکسان ولی لینک مبدأ دیگر (قطعه‌ی دیگری با نام عمومی مثل «ساز و آواز» یا «ربنا»):
+ |     اگر $bm_same_title = 'number' باشد (ارسال دستی/آرشیو با گزینه‌ی «ثبت با شماره») با شماره‌ی تمایز
+ |     ثبت می‌شود: «ساز و آواز (2)» و نام فایل «… - Saz o Avaz 2 [320].mp3»؛ وگرنه (پیش‌فرض و ارسال
+ |     خودکار) رد می‌شود. پست‌های قدیمی که لینک مبدأ ندارند فقط با عنوان مقایسه می‌شوند.
+ * ------------------------------------------------------ */
+$bm_same_title_note = '';
+$bm_artist_note     = '';
+$same_title_mode    = isset($bm_same_title) ? (string) $bm_same_title : (isset($bot_same_title) ? (string) $bot_same_title : 'skip');
+
+// املای نام هنرمند: اگر همین هنرمند با املای دیگری در سایت ثبت شده («محمد رضا شجریان» ← «محمدرضا شجریان»)،
+// نام ثبت‌شده مبنا می‌شود تا عنوان، متا و ترم همه یکدست بمانند (فقط برای نام تک‌نفره)
+$bm_artist_tax_early = bm_artist_taxonomy(isset($bot_artist_taxonomy) ? $bot_artist_taxonomy : '');
+if ($bm_artist_tax_early !== '' && count(bm_split_artists($artist)) === 1 && !term_exists($artist, $bm_artist_tax_early)) {
+    $similar_id = bm_find_similar_artist_term($artist, bm_artist_term_slug($artist_en), $bm_artist_tax_early);
+    if ($similar_id) {
+        $similar_term = get_term($similar_id, $bm_artist_tax_early);
+        if ($similar_term && !is_wp_error($similar_term) && $similar_term->name !== $artist) {
+            $bm_artist_note = 'نام هنرمند «' . $artist . '» با ترم موجود «' . $similar_term->name . '» (ترم ' . $similar_id . ') یکی گرفته شد';
+            $artist = bm_clean_text($similar_term->name);
+        }
+    }
+}
+
+$source_exists = bm_post_id_by_source_url($postUrl);
+if ($source_exists) {
+    exit('همین آهنگ (همین لینک مبدأ) قبلاً ثبت شده است. ID: ' . intval($source_exists)
+        . bm_result_marker('exists', ['reason' => 'source', 'post_id' => $source_exists, 'link' => get_permalink($source_exists), 'message' => 'همین لینک قبلاً ثبت شده (ID ' . $source_exists . ')']));
+}
+
+$title_exists = bm_post_id_by_title(trim("دانلود آهنگ {$artist} {$song}"));
+if ($title_exists) {
+    if ($same_title_mode !== 'number') {
+        exit('پست با این عنوان قبلاً ثبت شده است. ID: ' . intval($title_exists)
+            . ' — اگر قطعه‌ی دیگری با همین نام است، با گزینه‌ی «ثبت با شماره» دوباره بفرستید.'
+            . bm_result_marker('exists', ['reason' => 'title', 'post_id' => $title_exists, 'link' => get_permalink($title_exists), 'message' => 'پستی با همین عنوان هست (ID ' . $title_exists . ')']));
+    }
+    $same_n = 2;
+    while ($same_n < 100 && bm_post_id_by_title(trim("دانلود آهنگ {$artist} {$song} ({$same_n})"))) {
+        $same_n++;
+    }
+    $song    .= " ({$same_n})";
+    $song_en .= " {$same_n}";
+    $bm_same_title_note = "عنوان تکراری بود (پست ID {$title_exists})؛ با شماره‌ی {$same_n} ثبت شد";
 }
 
 /* -------------------------------------------------------
@@ -934,19 +1326,8 @@ $mp3_file_320 = "{$mp3_name} [320].mp3";
 $mp3_file_128 = "{$mp3_name} [128].mp3";
 
 /* -------------------------------------------------------
- |  5) جلوگیری از پست تکراری
+ |  5) جلوگیری از پست تکراری → به بخش 3-1 منتقل شد (قبل از ساخت نام‌ها)
  * ------------------------------------------------------ */
-$post_exists = $wpdb->get_var($wpdb->prepare(
-    "SELECT ID FROM {$wpdb->posts}
-     WHERE post_title = %s
-     AND post_type = 'post'
-     AND post_status IN ('publish', 'draft', 'pending', 'future')",
-    $mytitle
-));
-
-if ($post_exists) {
-    exit('پست با این عنوان قبلاً ثبت شده است. ID: ' . intval($post_exists));
-}
 
 /* -------------------------------------------------------
  |  5-1) یوزر/رمز اتصال به هاست دانلود (قبل از ساخت پست بررسی می‌شود تا پست بدون فایل ساخته نشود)
@@ -1012,8 +1393,11 @@ $post_id = wp_insert_post($post_data, true);
 
 if (is_wp_error($post_id) || !$post_id) {
     $msg = is_wp_error($post_id) ? $post_id->get_error_message() : 'Unknown error';
-    exit('خطا در ایجاد پست: ' . esc_html($msg));
+    exit('خطا در ایجاد پست: ' . esc_html($msg) . bm_result_marker('error', ['reason' => 'insert', 'message' => 'خطا در ایجاد پست: ' . $msg]));
 }
+
+// لینک مبدأ روی پست می‌ماند تا همان آهنگ دوباره ثبت نشود (و آرشیو هنرمندان وضعیت را دقیق نشان دهد)
+update_post_meta($post_id, '_bm_source_url', esc_url_raw($postUrl));
 
 /* -------------------------------------------------------
  |  8) سئو (Yoast)
@@ -1180,6 +1564,15 @@ update_post_meta($post_id, '_bm_featured_image_result', maybe_serialize($image_r
  |  13) دانلود موزیک‌ها روی هاست دانلود
  * ------------------------------------------------------ */
 $download_response = null;
+$download_info     = null;
+
+// لینک‌های مبدأ روی پست می‌ماند تا اگر انتقال ناموفق شد، bot/dl-repair.php بدون نیاز دوباره به API آن را تکرار کند
+update_post_meta($post_id, '_bm_media_urls', wp_json_encode([
+    'music320' => $music320,
+    'music128' => $music128,
+    'image'    => $imageUrl,
+    'source'   => $postUrl,
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
 if (!empty($functions_dl_music)) {
     $download_response = bm_curl_post_form($functions_dl_music, [
@@ -1193,9 +1586,15 @@ if (!empty($functions_dl_music)) {
         'file_128'  => $mp3_file_128,
         'dir_file'  => $dl_dir, // مثال: music/m/mohsen-yeganeh
     ], 300, $dl_userpwd);
+    $download_info = bm_dl_response_info($download_response);
 
     // برای بررسی لاگ
     update_post_meta($post_id, '_bm_download_response', maybe_serialize($download_response));
+    if ($download_info['ok']) {
+        delete_post_meta($post_id, '_bm_download_failed');
+    } else {
+        update_post_meta($post_id, '_bm_download_failed', current_time('mysql'));
+    }
 }
 
 /* -------------------------------------------------------
@@ -1203,14 +1602,23 @@ if (!empty($functions_dl_music)) {
  |  تا این‌جا پست پیش‌نویس بود؛ حالا که همه چیز آماده است منتشر می‌شود. این همان اتفاقی است که با
  |  زدن «به‌روزرسانی» در پیشخوان می‌افتد: هوک‌های save_post / publish_post قالب و افزونه‌ها
  |  (کش، پلیر صفحه‌ی اصلی، ارسال تلگرام، نقشه‌ی سایت و ...) پست را کامل می‌بینند.
+ |  اگر فایل‌ها به هاست دانلود نرسیده باشند و $bot_publish_without_files خاموش باشد، پست پیش‌نویس می‌ماند
+ |  (لینک دانلود خراب منتشر نمی‌شود)؛ با bot/dl-repair.php انتقال تکرار و پست منتشر می‌شود.
  * ------------------------------------------------------ */
-$publish_result = wp_update_post([
-    'ID'          => $post_id,
-    'post_status' => 'publish',
-], true);
+$post_published = false;
+$publish_error  = '';
 
-$post_published = !is_wp_error($publish_result) && (int) $publish_result > 0;
-$publish_error  = is_wp_error($publish_result) ? $publish_result->get_error_message() : '';
+if (is_array($download_info) && !$download_info['ok'] && empty($bot_publish_without_files)) {
+    $publish_error = 'فایل‌ها به هاست دانلود منتقل نشدند؛ پست پیش‌نویس ماند (بعد از رفع مشکل از bot/dl-repair.php دوباره بفرستید)';
+} else {
+    $publish_result = wp_update_post([
+        'ID'          => $post_id,
+        'post_status' => 'publish',
+    ], true);
+
+    $post_published = !is_wp_error($publish_result) && (int) $publish_result > 0;
+    $publish_error  = is_wp_error($publish_result) ? $publish_result->get_error_message() : '';
+}
 
 /* -------------------------------------------------------
  |  15) خروجی نهایی
@@ -1219,6 +1627,12 @@ echo '<div style="direction:rtl;text-align:right;background:#fff;border:1px soli
 echo '<strong>پست با موفقیت ساخته شد.</strong><br>';
 echo 'ID پست: ' . intval($post_id) . '<br>';
 echo 'عنوان: ' . esc_html($mytitle) . '<br>';
+if ($bm_same_title_note !== '') {
+    echo 'عنوان تکراری: ' . esc_html($bm_same_title_note) . '<br>';
+}
+if ($bm_artist_note !== '') {
+    echo 'املای هنرمند: ' . esc_html($bm_artist_note) . '<br>';
+}
 echo 'تصویر شاخص: ' . esc_html($image_result['message']) . '<br>';
 $author_user = get_userdata($post_author_id);
 echo 'نویسنده: ' . esc_html($author_user ? $author_user->display_name . ' (' . $author_user->user_login . ' — ID ' . $post_author_id . ')' : 'ID ' . $post_author_id) . '<br>';
@@ -1243,22 +1657,21 @@ if ($artist_taxonomy === '') {
         . (count($artist_report) > 1 ? '، ' . count($artist_report) . ' هنرمند جدا' : '') . '<br>';
 }
 
-if (is_array($download_response)) {
+if (is_array($download_info)) {
     echo 'پوشه هاست دانلود: ' . esc_html($dl_dir) . '<br>';
-    echo 'دانلود موزیک: ' . ($download_response['success'] ? 'انجام شد' : 'ناموفق') . '<br>';
-    if (!$download_response['success']) {
-        $dl_error = 'HTTP ' . intval($download_response['code']);
-        if (!empty($download_response['error'])) {
-            $dl_error .= ' | ' . $download_response['error'];
-        }
-        if (intval($download_response['code']) === 401) {
-            $dl_error .= ' | هاست دانلود یوزر/رمز را نپذیرفت (config.php هر دو هاست باید یکی باشد)';
-        }
-        if (!empty($download_response['body'])) {
-            $dl_error .= ' | ' . mb_substr(trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags((string) $download_response['body']))), 0, 250);
-        }
-        echo 'خطای دانلود موزیک: ' . esc_html($dl_error) . '<br>';
+    echo 'دانلود موزیک: ' . ($download_info['ok'] ? 'انجام شد' : 'ناموفق') . ($download_info['ok'] && $download_info['summary'] !== '' ? ' — ' . esc_html($download_info['summary']) : '') . '<br>';
+    if (!$download_info['ok']) {
+        echo 'خطای دانلود موزیک: ' . esc_html($download_info['summary']) . '<br>';
     }
 }
 
 echo '</div>';
+echo bm_result_marker('ok', [
+    'post_id'   => (int) $post_id,
+    'link'      => get_permalink($post_id),
+    'title'     => $mytitle,
+    'published' => $post_published,
+    'download'  => is_array($download_info) ? (bool) $download_info['ok'] : null,
+    'download_error' => is_array($download_info) && !$download_info['ok'] ? $download_info['summary'] : '',
+    'note'      => trim($bm_same_title_note . ($bm_artist_note !== '' ? ($bm_same_title_note !== '' ? '؛ ' : '') . $bm_artist_note : '')),
+]);
