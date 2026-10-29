@@ -585,6 +585,152 @@ function bm_dl_response_info($response) {
 }
 
 /**
+ * از پاسخ JSON هاست دانلود (music.php نسخه‌ی ۲): کدام کیفیت‌ها واقعاً روی هاست نشستند؟
+ * ورودی: خروجی bm_dl_response_info() یا هر آرایه‌ای که کلید files (آرایه‌ی فایل‌های پاسخ) داشته باشد
+ * خروجی: ['320' => true|false|null, '128' => true|false|null]؛ null یعنی این کیفیت اصلاً خواسته نشده بود (مبدأ نداشت)
+ *         و برای پاسخ غیر JSON (music.php قدیمی) null، چون تفکیک کیفیت‌ها معلوم نیست.
+ */
+function bm_dl_landed(array $info) {
+    if (!isset($info['files']) || !is_array($info['files']) || (array_key_exists('json', $info) && !is_array($info['json']))) {
+        return null;
+    }
+    $landed = ['320' => null, '128' => null];
+    foreach ($info['files'] as $file) {
+        $quality = isset($file['quality']) ? (string) $file['quality'] : '';
+        if (array_key_exists($quality, $landed)) {
+            $landed[$quality] = !empty($file['ok']);
+        }
+    }
+    return $landed;
+}
+
+/**
+ * متن خطای یک کیفیت در پاسخ هاست دانلود (برای گزارش)، مثل «HTTP 404 از سرور مبدأ (فایل در مبدأ نیست)»؛ اگر آن کیفیت خطا نداشت ''
+ */
+function bm_dl_file_error(array $info, $quality) {
+    $files = isset($info['files']) && is_array($info['files']) ? $info['files'] : [];
+    foreach ($files as $file) {
+        if (isset($file['quality']) && (string) $file['quality'] === (string) $quality && empty($file['ok'])) {
+            return isset($file['error']) && (string) $file['error'] !== '' ? (string) $file['error'] : 'نامشخص';
+        }
+    }
+    return '';
+}
+
+/**
+ * آیا این خطای انتقال از آن نوعی است که تکرارش فایده ندارد؟
+ * (فایل در مبدأ نیست: HTTP 404/410؛ یا آدرس مبدأ به‌جای فایل صوتی چیز دیگری مثل عکس برمی‌گرداند؛ یا فایل خالی است)
+ */
+function bm_dl_error_is_permanent($error) {
+    $error = (string) $error;
+    if ($error === '') {
+        return false;
+    }
+    foreach (['HTTP 404', 'HTTP 410', 'is not audio', 'empty file'] as $needle) {
+        if (strpos($error, $needle) !== false) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** «هر دو کیفیت» / «فقط 128» / «فقط 320» / «هیچ‌کدام» از روی ['320' => bool, '128' => bool] */
+function bm_quality_label(array $have) {
+    $h320 = !empty($have['320']);
+    $h128 = !empty($have['128']);
+    if ($h320 && $h128) {
+        return 'هر دو کیفیت';
+    }
+    if ($h128) {
+        return 'فقط 128';
+    }
+    if ($h320) {
+        return 'فقط 320';
+    }
+    return 'هیچ‌کدام';
+}
+
+/**
+ * هماهنگ کردن متاهای music320 / music128 / online با فایل‌هایی که واقعاً روی هاست دانلود هستند
+ *   $have  = ['320' => bool, '128' => bool]   کدام کیفیت‌ها روی هاست هست
+ *   $links = ['320' => لینک, '128' => لینک]   لینک هر کیفیت روی هاست دانلود
+ * قاعده (همان قاعده‌ی پست‌ساز و اسکریپت اصلی قالب): music320 فقط وقتی فایل 320 هست؛ music128 و online به فایل 128 و در
+ * نبودِ 128 به فایل 320 اشاره می‌کنند. کیفیتی که روی هاست نیست از پست برداشته می‌شود تا دکمه‌ی دانلود خراب (404) نماند.
+ * اگر هیچ فایلی نباشد به متاها دست نمی‌زند (پست پیش‌نویس می‌ماند و bot/dl-repair.php از روی همین متاها ترمیمش می‌کند).
+ * خروجی: ['usable' => bool (دست‌کم یک کیفیت هست), 'label' => bm_quality_label, 'changes' => [متن تغییرها]]
+ */
+function bm_sync_music_metas($post_id, array $have, array $links) {
+    $changes = [];
+    $link320 = !empty($have['320']) && !empty($links['320']) ? esc_url_raw((string) $links['320']) : '';
+    $link128 = !empty($have['128']) && !empty($links['128']) ? esc_url_raw((string) $links['128']) : '';
+    $online  = $link128 !== '' ? $link128 : $link320;
+
+    if ($online === '') {
+        return ['usable' => false, 'label' => bm_quality_label($have), 'changes' => []];
+    }
+
+    $cur320 = (string) get_post_meta($post_id, 'music320', true);
+    if ($link320 === '') {
+        if ($cur320 !== '') {
+            delete_post_meta($post_id, 'music320');
+            $changes[] = 'لینک 320 از پست برداشته شد (فایل 320 روی هاست دانلود نیست)';
+        }
+    } elseif ($cur320 !== $link320) {
+        update_post_meta($post_id, 'music320', $link320);
+        $changes[] = 'لینک 320 روی پست گذاشته شد';
+    }
+
+    $cur128    = (string) get_post_meta($post_id, 'music128', true);
+    $curOnline = (string) get_post_meta($post_id, 'online', true);
+    if ($cur128 !== $online || $curOnline !== $online) {
+        update_post_meta($post_id, 'music128', $online);
+        update_post_meta($post_id, 'online', $online);
+        $changes[] = $link128 !== ''
+            ? 'لینک 128 و پخش آنلاین روی پست گذاشته شد'
+            : 'لینک 128 و پخش آنلاین به فایل 320 وصل شد (فایل 128 روی هاست دانلود نیست)';
+    }
+
+    return ['usable' => true, 'label' => bm_quality_label($have), 'changes' => $changes];
+}
+
+/**
+ * ثبت وضعیت انتقال روی پست (bot/dl-repair.php از همین‌ها استفاده می‌کند):
+ *   ok      → هر دو متای _bm_download_failed و _bm_download_partial پاک می‌شود
+ *   partial → فقط بعضی کیفیت‌ها رسیده و پست با همان‌ها منتشر شده؛ _bm_download_partial = توضیح (مثلاً «فقط 128 — [320] ناموفق: …»)
+ *   failed  → هیچ فایلی نرسیده (پست پیش‌نویس می‌ماند)؛ _bm_download_failed = زمان
+ */
+function bm_set_download_state($post_id, $state, $note = '') {
+    if ($state === 'ok') {
+        delete_post_meta($post_id, '_bm_download_failed');
+        delete_post_meta($post_id, '_bm_download_partial');
+    } elseif ($state === 'partial') {
+        delete_post_meta($post_id, '_bm_download_failed');
+        update_post_meta($post_id, '_bm_download_partial', $note !== '' ? $note : current_time('mysql'));
+    } else {
+        update_post_meta($post_id, '_bm_download_failed', current_time('mysql'));
+        delete_post_meta($post_id, '_bm_download_partial');
+    }
+}
+
+/**
+ * حدس نوع صفحه‌ی مبدأ وقتی لینک فایل آهنگ ندارد: 'آلبوم' | 'موزیک ویدیو' | 'پلی‌لیست' | ''
+ * از نامک لینک (…-album، …-video) و وجود لینک ویدیو در پاسخ API
+ */
+function bm_guess_source_kind($url, $has_video = false) {
+    $path = strtolower((string) parse_url((string) $url, PHP_URL_PATH));
+    if (preg_match('#-album(?:-\d+)?/?$#', $path)) {
+        return 'آلبوم';
+    }
+    if ($has_video || preg_match('#(?:^|[-/])(?:music-)?video(?:-\d+)?/?$#', $path)) {
+        return 'موزیک ویدیو';
+    }
+    if (strpos($path, '/playlist') !== false) {
+        return 'پلی‌لیست';
+    }
+    return '';
+}
+
+/**
  * اگر term وجود نداشت بساز و سپس روی پست ست کن
  */
 function bm_set_term_if_not_empty($post_id, $value, $taxonomy, $append = false) {
@@ -1258,6 +1404,20 @@ if ($artist === '' || $song === '') {
     exit('خطا: نام خواننده یا نام آهنگ از API دریافت نشد.' . bm_result_marker('error', ['reason' => 'api', 'message' => 'نام خواننده یا نام آهنگ از API دریافت نشد']));
 }
 
+// صفحه‌ی مبدأ باید دست‌کم یک لینک فایل آهنگ (320 یا 128) داشته باشد. صفحه‌ی آلبوم، موزیک ویدیو یا پلی‌لیست لینک تک‌آهنگ
+// ندارد و ساختن پست برای آن فقط یک پیش‌نویس بی‌فایده با خطای «no music url was sent» روی هاست دانلود می‌سازد.
+// ربات فقط تک‌آهنگ ثبت می‌کند؛ آلبوم و ویدیو را با پست‌ساز بفرستید. (قبل از ساختن پست متوقف می‌شود؛ چیزی ثبت نمی‌شود.)
+if ($music320 === '' && $music128 === '') {
+    $bm_nofile_kind = bm_guess_source_kind($postUrl, $video_low !== '' || $video_med !== '');
+    $bm_nofile_msg  = 'در صفحه‌ی مبدأ لینک فایل آهنگ (320/128) پیدا نشد'
+        . ($bm_nofile_kind !== '' ? ' — این صفحه ' . $bm_nofile_kind . ' است' : '')
+        . '؛ ربات فقط تک‌آهنگ ثبت می‌کند (آلبوم/ویدیو را با پست‌ساز بفرستید)';
+    if (isset($GLOBALS['bm_auto_job']) && is_array($GLOBALS['bm_auto_job'])) {
+        $GLOBALS['bm_auto_job']['skipped'] = $bm_nofile_msg; // auto.php: این آیتم «رد شد» ثبت می‌شود و دیگر تکرار نمی‌شود
+    }
+    exit('خطا: ' . $bm_nofile_msg . bm_result_marker('error', ['reason' => 'nofile', 'message' => $bm_nofile_msg]));
+}
+
 if ($artist_en === '') {
     $artist_en = $artist;
 }
@@ -1495,10 +1655,12 @@ if (!empty($urldlhost)) {
  |  11) ذخیره متاهای موزیک
  * ------------------------------------------------------ */
 
-// اگر فایل روی هاست خودت دانلود می‌شود، معمولاً بهتر است لینک‌های نهایی هاست خودت را ذخیره کنی.
-// ولی اگر خواستی مستقیم لینک API ذخیره شود، این منطق را عوض کن.
-$final_music320 = !empty($path_320) ? $path_320 : $music320;
-$final_music128 = !empty($path_128) ? $path_128 : $music128;
+// لینک نهایی هاست دانلود خودت ذخیره می‌شود (اگر $urldlhost خالی باشد، لینک مبدأ).
+// فقط کیفیتی که مبدأ دارد متا می‌گیرد (همان قاعده‌ی پست‌ساز و اسکریپت اصلی قالب): اگر مبدأ فقط 128 دارد، music320 نوشته
+// نمی‌شود تا دکمه‌ی 320 به فایلی که هیچ‌وقت ساخته نمی‌شود (404) اشاره نکند؛ در نبودِ 128، music128/online به فایل 320 وصل می‌شود.
+// بعد از انتقال (بخش ۱۳) اگر یکی از دو فایل نرسیده باشد، bm_sync_music_metas() متاها را با فایل‌های واقعی هماهنگ می‌کند.
+$final_music320 = $music320 !== '' ? (!empty($path_320) ? $path_320 : $music320) : '';
+$final_music128 = $music128 !== '' ? (!empty($path_128) ? $path_128 : $music128) : '';
 
 // کیفیت‌ها
 if (!empty($final_music320)) {
@@ -1576,6 +1738,10 @@ update_post_meta($post_id, '_bm_featured_image_result', maybe_serialize($image_r
  * ------------------------------------------------------ */
 $download_response = null;
 $download_info     = null;
+$download_usable   = null;  // null = انتقالی انجام نشد؛ true = دست‌کم یک کیفیت روی هاست دانلود نشست (پست قابل انتشار است)
+$download_partial  = false; // فقط یکی از دو کیفیت رسید (مثلاً لینک 320 مبدأ خراب بود) — پست با همان یکی منتشر می‌شود
+$download_label    = '';    // «هر دو کیفیت» / «فقط 128» / «فقط 320»
+$download_changes  = [];    // تغییر متاها بعد از انتقال ناقص (برای گزارش)
 
 // لینک‌های مبدأ روی پست می‌ماند تا اگر انتقال ناموفق شد، bot/dl-repair.php بدون نیاز دوباره به API آن را تکرار کند
 update_post_meta($post_id, '_bm_media_urls', wp_json_encode([
@@ -1601,10 +1767,28 @@ if (!empty($functions_dl_music)) {
 
     // برای بررسی لاگ
     update_post_meta($post_id, '_bm_download_response', maybe_serialize($download_response));
+
+    // نتیجه به تفکیک کیفیت (music.php نسخه‌ی ۲): اگر فقط یکی از دو فایل رسید، همان کافی است — لینک کیفیت نرسیده از پست
+    // برداشته می‌شود و پست با کیفیت موجود منتشر می‌شود (به‌جای این‌که به‌خاطر یک لینک خراب در مبدأ پیش‌نویس بماند).
+    $download_usable = (bool) $download_info['ok'];
+    $download_landed = bm_dl_landed($download_info);
+    if (is_array($download_landed) && !empty($urldlhost) && !$download_info['ok']) {
+        $download_have = ['320' => $download_landed['320'] === true, '128' => $download_landed['128'] === true];
+        if ($download_have['320'] || $download_have['128']) {
+            $download_sync    = bm_sync_music_metas($post_id, $download_have, ['320' => $path_320, '128' => $path_128]);
+            $download_usable  = $download_sync['usable'];
+            $download_partial = $download_sync['usable'];
+            $download_label   = $download_sync['label'];
+            $download_changes = $download_sync['changes'];
+        }
+    }
+
     if ($download_info['ok']) {
-        delete_post_meta($post_id, '_bm_download_failed');
+        bm_set_download_state($post_id, 'ok');
+    } elseif ($download_partial) {
+        bm_set_download_state($post_id, 'partial', $download_label . ' — ' . $download_info['summary']);
     } else {
-        update_post_meta($post_id, '_bm_download_failed', current_time('mysql'));
+        bm_set_download_state($post_id, 'failed');
     }
 }
 
@@ -1613,14 +1797,15 @@ if (!empty($functions_dl_music)) {
  |  تا این‌جا پست پیش‌نویس بود؛ حالا که همه چیز آماده است منتشر می‌شود. این همان اتفاقی است که با
  |  زدن «به‌روزرسانی» در پیشخوان می‌افتد: هوک‌های save_post / publish_post قالب و افزونه‌ها
  |  (کش، پلیر صفحه‌ی اصلی، ارسال تلگرام، نقشه‌ی سایت و ...) پست را کامل می‌بینند.
- |  اگر فایل‌ها به هاست دانلود نرسیده باشند و $bot_publish_without_files خاموش باشد، پست پیش‌نویس می‌ماند
+ |  اگر هیچ فایلی به هاست دانلود نرسیده باشد و $bot_publish_without_files خاموش باشد، پست پیش‌نویس می‌ماند
  |  (لینک دانلود خراب منتشر نمی‌شود)؛ با bot/dl-repair.php انتقال تکرار و پست منتشر می‌شود.
+ |  اگر دست‌کم یکی از دو کیفیت رسیده باشد، پست با همان منتشر می‌شود (متاها در بخش ۱۳ هماهنگ شده‌اند).
  * ------------------------------------------------------ */
 $post_published = false;
 $publish_error  = '';
 
-if (is_array($download_info) && !$download_info['ok'] && empty($bot_publish_without_files)) {
-    $publish_error = 'فایل‌ها به هاست دانلود منتقل نشدند؛ پست پیش‌نویس ماند (بعد از رفع مشکل از bot/dl-repair.php دوباره بفرستید)';
+if (is_array($download_info) && !$download_usable && empty($bot_publish_without_files)) {
+    $publish_error = 'هیچ فایلی به هاست دانلود منتقل نشد؛ پست پیش‌نویس ماند (بعد از رفع مشکل از bot/dl-repair.php دوباره بفرستید)';
 } else {
     $publish_result = wp_update_post([
         'ID'          => $post_id,
@@ -1670,8 +1855,15 @@ if ($artist_taxonomy === '') {
 
 if (is_array($download_info)) {
     echo 'پوشه هاست دانلود: ' . esc_html($dl_dir) . '<br>';
-    echo 'دانلود موزیک: ' . ($download_info['ok'] ? 'انجام شد' : 'ناموفق') . ($download_info['ok'] && $download_info['summary'] !== '' ? ' — ' . esc_html($download_info['summary']) : '') . '<br>';
-    if (!$download_info['ok']) {
+    if ($download_info['ok']) {
+        echo 'دانلود موزیک: انجام شد' . ($download_info['summary'] !== '' ? ' — ' . esc_html($download_info['summary']) : '') . '<br>';
+    } elseif ($download_partial) {
+        echo 'دانلود موزیک: ناقص — ' . esc_html($download_label) . ' روی هاست دانلود نشست و پست با همان منتشر شد — ' . esc_html($download_info['summary']) . '<br>';
+        foreach ($download_changes as $download_change) {
+            echo '&nbsp;&nbsp;— ' . esc_html($download_change) . '<br>';
+        }
+    } else {
+        echo 'دانلود موزیک: ناموفق<br>';
         echo 'خطای دانلود موزیک: ' . esc_html($download_info['summary']) . '<br>';
     }
 }
@@ -1682,7 +1874,8 @@ echo bm_result_marker('ok', [
     'link'      => get_permalink($post_id),
     'title'     => $mytitle,
     'published' => $post_published,
-    'download'  => is_array($download_info) ? (bool) $download_info['ok'] : null,
-    'download_error' => is_array($download_info) && !$download_info['ok'] ? $download_info['summary'] : '',
+    'download'  => is_array($download_info) ? (bool) $download_usable : null,
+    'download_error' => is_array($download_info) && !$download_usable ? $download_info['summary'] : '',
+    'download_note'  => $download_partial ? 'انتقال ناقص: ' . $download_label . ' روی هاست دانلود نشست و پست با همان منتشر شد — ' . $download_info['summary'] : '',
     'note'      => trim($bm_same_title_note . ($bm_artist_note !== '' ? ($bm_same_title_note !== '' ? '؛ ' : '') . $bm_artist_note : '')),
 ]);

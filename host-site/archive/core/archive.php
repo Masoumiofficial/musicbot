@@ -256,6 +256,9 @@ if (!function_exists('bm_archive_norm')) {
                     if (array_key_exists('download', $data) && $data['download'] === false) {
                         $parts[] = 'فایل‌ها به هاست دانلود منتقل نشدند' . (!empty($data['download_error']) ? ' (' . (string) $data['download_error'] . ')' : '');
                         $result['warning'] = 'فایل‌ها به هاست دانلود منتقل نشدند — بعد از رفع مشکل از bot/dl-repair.php دوباره بفرستید';
+                    } elseif (!empty($data['download_note'])) {
+                        // فقط یکی از دو کیفیت رسیده و پست با همان منتشر شده (مثلاً لینک 320 مبدأ خراب بود)
+                        $parts[] = (string) $data['download_note'];
                     }
                     if ($result['note'] !== '') {
                         $parts[] = $result['note'];
