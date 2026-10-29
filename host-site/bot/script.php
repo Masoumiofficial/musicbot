@@ -9,6 +9,8 @@ global $wpdb;
 require_once __DIR__ . '/auth.php';
 // لوگوی سایت روی کاور (تنظیمات $bot_watermark_* در config.php)
 require_once __DIR__ . '/watermark.php';
+// WebP برای سایزهای نمایشی کاور (فایل اصلی دست‌نخورده می‌ماند؛ تنظیمات $bot_webp_* در config.php)
+require_once __DIR__ . '/webp.php';
 
 $dir_wp = date('Y/m');
 
@@ -748,8 +750,13 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
     };
     add_filter('wp_unique_filename', $force_exact_name, 10, 4);
 
+    // سایزهای نمایشی (thumb1 … thumb4، thumb2x، medium، …) با WebP ساخته می‌شوند؛ خود فایل اصلی همان‌طور که هست
+    // آپلود می‌شود و «full» می‌ماند تا با کیفیت کامل قابل باز کردن باشد (bot/webp.php)
+    $webp = bm_webp_begin($desired_name);
+
     $attachment_id = media_handle_sideload($file_array, $post_id, $desc);
 
+    bm_webp_end($webp);
     remove_filter('wp_unique_filename', $force_exact_name, 10);
 
     if (is_wp_error($attachment_id)) {
@@ -800,17 +807,21 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
         ];
     }
 
-    // اندازه‌ی نهایی برای گزارش
-    $meta = wp_get_attachment_metadata($attachment_id);
-    $dims = (!empty($meta['width']) && !empty($meta['height']))
+    // اندازه‌ی نهایی و وضعیت WebP سایزها برای گزارش
+    $meta      = wp_get_attachment_metadata($attachment_id);
+    $dims      = (!empty($meta['width']) && !empty($meta['height']))
         ? ' (' . (int) $meta['width'] . '×' . (int) $meta['height'] . ')'
         : '';
+    $webp_note = bm_webp_describe($meta, $webp);
 
     return [
         'success'   => true,
-        'message'   => 'تصویر شاخص با موفقیت ثبت شد' . $dims . '.' . ($watermark['note'] !== '' ? ' ' . $watermark['note'] . '.' : ''),
+        'message'   => 'تصویر شاخص با موفقیت ثبت شد' . $dims . '.'
+            . ($watermark['note'] !== '' ? ' ' . $watermark['note'] . '.' : '')
+            . ($webp_note !== '' ? ' ' . $webp_note . '.' : ''),
         'id'        => $attachment_id,
         'watermark' => $watermark['note'],
+        'webp'      => $webp_note,
     ];
 }
 

@@ -126,14 +126,21 @@ function wmb_mark_info($attachment_id) {
     return is_array($info) ? $info : null;
 }
 
-/** ساخت دوباره‌ی همه‌ی سایزها از فایل اصلی اتچمنت */
+/** ساخت دوباره‌ی همه‌ی سایزها از فایل اصلی اتچمنت (سایزها طبق config.php با WebP؛ فایل اصلی دست‌نخورده — bot/webp.php) */
 function wmb_regenerate($attachment_id, $file) {
     if (get_attached_file($attachment_id) !== $file) {
         update_attached_file($attachment_id, $file);
     }
+    $old  = wp_get_attachment_metadata($attachment_id);
+    $webp = bm_webp_begin($file);
     $meta = wp_generate_attachment_metadata($attachment_id, $file);
+    bm_webp_end($webp);
     if (is_array($meta) && !empty($meta)) {
         wp_update_attachment_metadata($attachment_id, $meta);
+        // فایل سایزهای قبلی که دیگر در متادیتا نیستند (مثلاً JPEG‌های قدیمی وقتی سایزهای تازه WebP شدند) پاک شوند
+        if (function_exists('bm_webp_delete_stale_sizes')) {
+            bm_webp_delete_stale_sizes($file, $old, $meta);
+        }
         return true;
     }
     return false;
@@ -497,6 +504,7 @@ img.thumb{width:48px;height:48px;object-fit:cover;border-radius:6px}
   <h1>لوگوی سایت روی کاورها</h1>
   <div class="toolbar">
     <a class="btn gray" href="<?php echo wmb_h($wmb_self); ?>">وضعیت و پیش‌نمایش</a>
+    <a class="btn gray" href="webp-batch.php">WebP برای کاورها</a>
     <a class="btn gray" href="dl-repair.php">ترمیم هاست دانلود</a>
     <a class="btn gray" href="meta-compare.php">مقایسه‌ی متاها</a>
   </div>
