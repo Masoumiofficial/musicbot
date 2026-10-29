@@ -9,14 +9,19 @@
  *   /bot/dl-repair.php?probe=1              تشخیص مسدودسازی: چند درخواست با شکل‌های مختلف (بدون/با User-Agent، GET/POST، با لینک خارجی،
  *                                           بسته‌بندی‌شده) به music.php می‌فرستد و می‌گوید وب‌سرور/WAF هاست دانلود کدام را رد می‌کند
  *   دکمه‌ی «انتقال دوباره»                  فایل‌های پست‌های انتخاب‌شده دوباره به music.php فرستاده می‌شود؛ اگر پست به‌خاطر همین خطا
- *                                           پیش‌نویس مانده بود و انتقال موفق شد، منتشر می‌شود
+ *                                           پیش‌نویس مانده بود و دست‌کم یکی از دو کیفیت روی هاست نشست، منتشر می‌شود.
+ *                                           متاهای music320/music128/online با فایل‌های واقعی هماهنگ می‌شود: کیفیتی که روی هاست
+ *                                           نیست از پست برداشته می‌شود (دکمه‌ی 404 نمی‌ماند) و اگر 128 نباشد، پخش آنلاین به 320 وصل می‌شود.
+ *   دکمه‌ی «زباله‌دان»                       پیش‌نویس‌های تیک‌خورده‌ای که فایلشان در مبدأ هم نیست (HTTP 404 / فایل غیرصوتی) به زباله‌دان
+ *                                           می‌روند؛ پست‌های منتشرشده دست نمی‌خورند.
  *
  * لینک‌های مبدأ از کجا می‌آید؟ (به ترتیب)
  *   1) متای _bm_media_urls (پست‌هایی که ربات نسخه‌ی جدید ساخته)
  *   2) لینک صفحه‌ی مبدأ در متای _bm_source_url یا جدول wp_subcheck (ارسال خودکار) → پرس‌وجوی دوباره از API
  *   3) لینکی که خودتان در ستون «لینک مبدأ» می‌نویسید (صفحه‌ی آهنگ در mybia2music)
  *
- * فقط پشت همان یوزر/رمز ربات. چیزی را حذف نمی‌کند؛ فقط فایل‌ها را دوباره منتقل و در صورت نیاز پست را منتشر می‌کند.
+ * فقط پشت همان یوزر/رمز ربات. فایلی از هاست دانلود پاک نمی‌کند؛ فقط فایل‌ها را دوباره منتقل، متاها را هماهنگ و در صورت نیاز
+ * پست را منتشر می‌کند (یا با دکمه‌ی جداگانه، پیش‌نویس انتخاب‌شده را به زباله‌دان وردپرس می‌فرستد که قابل بازگردانی است).
  */
 include('config.php');
 require_once __DIR__ . '/auth.php';
@@ -213,7 +218,11 @@ function dlr_media_for_post($post_id, $manual_source, $api_url) {
     return ['ok' => true, 'media' => $media, 'from' => 'API (' . $source . ')', 'error' => ''];
 }
 
-/** مسیر و نام فایل‌ها از روی لینک‌های ذخیره‌شده در متای music320 / music128 (دقیقاً همان لینک‌هایی که در پست نمایش داده می‌شود) */
+/**
+ * مسیر و نام فایل‌ها از روی لینک‌های ذخیره‌شده در متای music320 / music128 (همان پوشه‌ای که فایل‌های پست در آن است)
+ * نام هر کیفیت همیشه «نام پایه + [320]/[128]» ساخته می‌شود، نه از روی لینک همان کیفیت: وقتی 128 نبوده، music128 به فایل 320
+ * اشاره می‌کند و اگر نام از روی آن گرفته می‌شد، فایل 128 روی فایل 320 نوشته می‌شد.
+ */
 function dlr_target_from_post($post_id, $dl_host) {
     $link320 = (string) get_post_meta($post_id, 'music320', true);
     $link128 = (string) get_post_meta($post_id, 'music128', true);
@@ -225,41 +234,47 @@ function dlr_target_from_post($post_id, $dl_host) {
     }
     $relative = rawurldecode(substr($base, strlen($host) + 1));
     $dir      = trim((string) dirname($relative), '/.');
-    $name320  = $link320 !== '' ? rawurldecode(basename($link320)) : '';
-    $name128  = $link128 !== '' ? rawurldecode(basename($link128)) : '';
-    $mp3_name = preg_replace('/\s*\[(320|128)\]\.mp3$/i', '', $name320 !== '' ? $name320 : $name128);
+    // نام پایه: پسوند کیفیت به هر دو شکل جدید «[320]» و قدیمی «(128)» و خود .mp3 برداشته می‌شود
+    $mp3_name = preg_replace('/\s*(?:\[(?:320|128)\]|\((?:320|128)\))?\.mp3$/i', '', rawurldecode(basename($base)));
 
     if ($dir === '' || $mp3_name === '') {
         return null;
     }
     return [
         'dir'      => $dir,
-        'file_320' => $name320 !== '' ? $name320 : "{$mp3_name} [320].mp3",
-        'file_128' => $name128 !== '' ? $name128 : "{$mp3_name} [128].mp3",
+        'file_320' => "{$mp3_name} [320].mp3",
+        'file_128' => "{$mp3_name} [128].mp3",
         'mp3_name' => $mp3_name,
         'link320'  => $link320,
         'link128'  => $link128,
     ];
 }
 
-/** انتقال دوباره‌ی یک پست؛ خروجی: ['ok' => bool, 'lines' => [گزارش], 'published' => bool] */
+/**
+ * انتقال دوباره‌ی یک پست
+ * خروجی: ['ok' => bool (دست‌کم یک کیفیت روی هاست هست), 'all' => bool (همه‌ی کیفیت‌های مبدأ رسیده), 'label' => «فقط 128» و…,
+ *          'lines' => [گزارش], 'published' => bool]
+ */
 function dlr_repair_post($post_id, $manual_source) {
     global $functions_dl_music, $urldlhost, $dl_userpwd, $bm_api_url;
 
     $lines = [];
     $post  = get_post($post_id);
     if (!$post) {
-        return ['ok' => false, 'lines' => ['پست پیدا نشد'], 'published' => false];
+        return ['ok' => false, 'all' => false, 'label' => '', 'lines' => ['پست پیدا نشد'], 'published' => false];
     }
     $target = dlr_target_from_post($post_id, $urldlhost);
     if ($target === null) {
-        return ['ok' => false, 'lines' => ['متای music320/music128 پست لینک هاست دانلود ندارد؛ این پست را ربات نساخته یا لینک‌ها دستی عوض شده'], 'published' => false];
+        return ['ok' => false, 'all' => false, 'label' => '', 'lines' => ['متای music320/music128 پست لینک هاست دانلود ندارد؛ این پست را ربات نساخته یا لینک‌ها دستی عوض شده'], 'published' => false];
     }
     $media = dlr_media_for_post($post_id, $manual_source, $bm_api_url);
     if (!$media['ok']) {
-        return ['ok' => false, 'lines' => [$media['error']], 'published' => false];
+        return ['ok' => false, 'all' => false, 'label' => '', 'lines' => [$media['error']], 'published' => false];
     }
     $lines[] = 'لینک مبدأ از ' . $media['from'];
+
+    $src320 = trim((string) ($media['media']['music320'] ?? ''));
+    $src128 = trim((string) ($media['media']['music128'] ?? ''));
 
     $artist_en = (string) get_post_meta($post_id, 'artist_en', true);
     $song_en   = (string) get_post_meta($post_id, 'song_en', true);
@@ -271,8 +286,8 @@ function dlr_repair_post($post_id, $manual_source) {
     }
 
     $response = bm_curl_post_form($functions_dl_music, [
-        'music320'  => (string) ($media['media']['music320'] ?? ''),
-        'music128'  => (string) ($media['media']['music128'] ?? ''),
+        'music320'  => $src320,
+        'music128'  => $src128,
         'artist_en' => $artist_en,
         'song_en'   => $song_en,
         'image'     => (string) ($media['media']['image'] ?? ''),
@@ -287,31 +302,106 @@ function dlr_repair_post($post_id, $manual_source) {
 
     $lines[] = ($info['ok'] ? 'انتقال انجام شد: ' : 'انتقال ناموفق: ') . $info['summary'];
 
-    // بررسی نهایی: فایل‌ها واقعاً روی هاست هستند؟
-    $verify_ok = true;
-    foreach (['320' => $target['link320'], '128' => $target['link128']] as $q => $link) {
-        if ($link === '') {
+    // بررسی نهایی: کدام فایل‌ها واقعاً روی هاست هستند؟ فقط کیفیت‌هایی که مبدأ دارد انتظار می‌رود
+    // (لینک از پوشه/نام فایل پست ساخته می‌شود تا کیفیتی که قبلاً متایش برداشته شده هم بررسی شود)
+    $host   = rtrim((string) $urldlhost, '/');
+    $links  = [
+        '320' => esc_url_raw($host . '/' . $target['dir'] . '/' . $target['file_320']),
+        '128' => esc_url_raw($host . '/' . $target['dir'] . '/' . $target['file_128']),
+    ];
+    $wanted = ['320' => $src320 !== '', '128' => $src128 !== ''];
+    $have   = ['320' => false, '128' => false];
+    foreach (['320', '128'] as $q) {
+        if (!$wanted[$q]) {
             continue;
         }
-        $head = dlr_head($link);
-        $good = $head['code'] >= 200 && $head['code'] < 300;
-        $verify_ok = $verify_ok && $good;
-        $lines[] = "[{$q}] " . ($good ? 'روی هاست هست (' . size_format($head['size']) . ')' : 'هنوز نیست (HTTP ' . $head['code'] . ($head['error'] !== '' ? ' ' . $head['error'] : '') . ')');
+        $head     = dlr_head($links[$q]);
+        $have[$q] = $head['code'] >= 200 && $head['code'] < 300;
+        $why      = bm_dl_file_error($info, $q);
+        $lines[]  = "[{$q}] " . ($have[$q]
+            ? 'روی هاست هست (' . size_format($head['size']) . ')'
+            : 'هنوز نیست (HTTP ' . $head['code'] . ($head['error'] !== '' ? ' ' . $head['error'] : '') . ')'
+                . (bm_dl_error_is_permanent($why) ? ' — در مبدأ هم موجود/سالم نیست؛ انتقال دوباره فایده ندارد' : ''));
     }
 
+    $all_ok    = (!$wanted['320'] || $have['320']) && (!$wanted['128'] || $have['128']);
+    $usable    = $have['320'] || $have['128'];
     $published = false;
-    if ($info['ok'] && $verify_ok) {
-        delete_post_meta($post_id, '_bm_download_failed');
+    $label     = bm_quality_label($have);
+
+    if ($usable) {
+        // متاهای پست با فایل‌های واقعی هماهنگ می‌شود: کیفیت نرسیده برداشته، کیفیت رسیده گذاشته می‌شود
+        $sync = bm_sync_music_metas($post_id, $have, $links);
+        foreach ($sync['changes'] as $change) {
+            $lines[] = $change;
+        }
+        if ($all_ok) {
+            bm_set_download_state($post_id, 'ok');
+        } else {
+            bm_set_download_state($post_id, 'partial', $label . ' — ' . $info['summary']);
+            $lines[] = 'پست با ' . $label . ' قابل استفاده است';
+        }
         if ($post->post_status === 'draft') {
             $r = wp_update_post(['ID' => $post_id, 'post_status' => 'publish'], true);
             $published = !is_wp_error($r) && (int) $r > 0;
-            $lines[]   = $published ? 'پست پیش‌نویس منتشر شد' : 'انتشار پست ناموفق: ' . (is_wp_error($r) ? $r->get_error_message() : '');
+            $lines[]   = $published ? 'پست پیش‌نویس منتشر شد' . ($all_ok ? '' : ' (' . $label . ')') : 'انتشار پست ناموفق: ' . (is_wp_error($r) ? $r->get_error_message() : '');
         }
     } else {
-        update_post_meta($post_id, '_bm_download_failed', current_time('mysql'));
+        bm_set_download_state($post_id, 'failed');
     }
 
-    return ['ok' => $info['ok'] && $verify_ok, 'lines' => $lines, 'published' => $published];
+    return ['ok' => $usable, 'all' => $all_ok, 'label' => $label, 'lines' => $lines, 'published' => $published];
+}
+
+/**
+ * تفسیر آخرین پاسخ هاست دانلود برای راهنمایی کاربر
+ * خروجی: ['permanent' => bool, 'text' => string]
+ *   permanent = هیچ کیفیتی نرسیده و همه‌ی خطاها دائمی است (فایل در مبدأ نیست / آدرس مبدأ به‌جای فایل صوتی عکس می‌دهد) → انتقال دوباره فایده ندارد
+ *   اگر یک کیفیت رسیده و کیفیت دیگر خطای دائمی دارد → متن می‌گوید «انتقال دوباره» پست را با کیفیت موجود منتشر می‌کند
+ */
+function dlr_permanent_hint($info) {
+    $none = ['permanent' => false, 'text' => ''];
+    if (!is_array($info) || empty($info['files']) || !is_array($info['files'])) {
+        return $none;
+    }
+    $ok = 0;
+    $failed = 0;
+    $permanent = 0;
+    $bad = [];
+    foreach ($info['files'] as $file) {
+        if (!empty($file['ok'])) {
+            $ok++;
+            continue;
+        }
+        $failed++;
+        if (bm_dl_error_is_permanent(isset($file['error']) ? $file['error'] : '')) {
+            $permanent++;
+            $bad[] = isset($file['quality']) ? (string) $file['quality'] : '?';
+        }
+    }
+    if ($failed === 0 || $failed !== $permanent) {
+        return $none;
+    }
+    if ($ok === 0) {
+        return ['permanent' => true, 'text' => 'فایل در مبدأ نیست یا خراب است؛ انتقال دوباره فایده ندارد'];
+    }
+    return ['permanent' => false, 'text' => 'کیفیت ' . implode('/', $bad) . ' در مبدأ نیست یا خراب است؛ «انتقال دوباره» پست را با کیفیت موجود منتشر می‌کند'];
+}
+
+/** لینک‌های مبدأ ذخیره‌شده روی پست: null = متایی نیست، وگرنه ['has_file' => bool, 'source' => لینک صفحه] */
+function dlr_saved_media($post_id) {
+    $raw = (string) get_post_meta($post_id, '_bm_media_urls', true);
+    if ($raw === '') {
+        return null;
+    }
+    $saved = json_decode($raw, true);
+    if (!is_array($saved)) {
+        return null;
+    }
+    return [
+        'has_file' => trim((string) ($saved['music320'] ?? '')) !== '' || trim((string) ($saved['music128'] ?? '')) !== '',
+        'source'   => (string) ($saved['source'] ?? ''),
+    ];
 }
 
 /* -------------------------------------------------------
@@ -494,8 +584,33 @@ if (isset($_GET['probe'])) {
     echo '</div>';
 }
 
+/* ---------- trash: پیش‌نویس‌های تیک‌خورده → زباله‌دان (پست منتشرشده دست نمی‌خورد) ---------- */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['trash']) && !empty($_POST['repair']) && is_array($_POST['repair'])) {
+    check_admin_referer('bm_dl_repair');
+    $ids = array_values(array_unique(array_map('intval', $_POST['repair'])));
+    echo '<div class="box"><h2>انتقال به زباله‌دان (' . count($ids) . ' پست تیک‌خورده)</h2>';
+    echo '<table><tr><th style="width:70px">پست</th><th>عنوان</th><th>نتیجه</th></tr>';
+    $trashed = 0;
+    foreach ($ids as $id) {
+        $p = $id > 0 ? get_post($id) : null;
+        if (!$p) {
+            continue;
+        }
+        if ($p->post_status !== 'draft') {
+            $note = '<span class="warn">دست نخورد</span> — فقط پیش‌نویس‌ها به زباله‌دان می‌روند (این پست ' . ($p->post_status === 'publish' ? 'منتشرشده' : dlr_h($p->post_status)) . ' است)';
+        } elseif (wp_trash_post($id)) {
+            $trashed++;
+            $note = '<span class="ok">به زباله‌دان رفت</span> — از پیشخوان › نوشته‌ها › زباله‌دان قابل بازگردانی است';
+        } else {
+            $note = '<span class="bad">نشد</span>';
+        }
+        echo '<tr><td>' . (int) $id . '</td><td>' . dlr_h($p->post_title) . '</td><td>' . $note . '</td></tr>';
+    }
+    echo '</table><p><b>' . $trashed . '</b> پیش‌نویس به زباله‌دان رفت. <a href="' . $self . '">بازگشت به فهرست</a></p></div>';
+}
+
 /* ---------- repair ---------- */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['repair']) && is_array($_POST['repair'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['trash']) && !empty($_POST['repair']) && is_array($_POST['repair'])) {
     check_admin_referer('bm_dl_repair');
     $ids     = array_values(array_unique(array_map('intval', $_POST['repair'])));
     $sources = isset($_POST['source']) && is_array($_POST['source']) ? $_POST['source'] : [];
@@ -516,12 +631,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['repair']) && is_arra
             $manual = isset($sources[$id]) ? trim((string) $sources[$id]) : '';
             $res    = dlr_repair_post($id, $manual);
             $done_ok += $res['ok'] ? 1 : 0;
+            if (!$res['ok']) {
+                $verdict = '<span class="bad">ناموفق</span>';
+            } elseif (!empty($res['all'])) {
+                $verdict = '<span class="ok">درست شد</span>';
+            } else {
+                $verdict = '<span class="warn">ناقص ولی قابل استفاده (' . dlr_h($res['label']) . ')</span>';
+            }
             echo '<tr><td>' . $id . '</td><td><a href="' . esc_url(get_permalink($id)) . '" target="_blank">' . dlr_h(get_the_title($id)) . '</a></td><td>'
-                . '<span class="' . ($res['ok'] ? 'ok' : 'bad') . '">' . ($res['ok'] ? 'درست شد' : 'ناموفق') . '</span>'
+                . $verdict
                 . '<ul class="report"><li>' . implode('</li><li>', array_map('dlr_h', $res['lines'])) . '</li></ul></td></tr>';
         }
         echo '</table>';
-        echo '<p><b>' . $done_ok . '</b> از <b>' . count($ids) . '</b> پست درست شد. <a href="' . $self . '">بازگشت به فهرست</a></p>';
+        echo '<p><b>' . $done_ok . '</b> از <b>' . count($ids) . '</b> پست دست‌کم یک کیفیت سالم دارد و قابل استفاده است. <a href="' . $self . '">بازگشت به فهرست</a></p>';
     }
     echo '</div>';
 }
@@ -534,7 +656,11 @@ $posts = get_posts([
     'orderby'        => 'date',
     'order'          => 'DESC',
     'date_query'     => [['after' => $dlr_days . ' days ago', 'inclusive' => true]],
-    'meta_query'     => [['key' => 'music320', 'compare' => 'EXISTS']],
+    'meta_query'     => [
+        'relation' => 'OR', // پست‌هایی که مبدأشان فقط 128 داشته، music320 ندارند
+        ['key' => 'music320', 'compare' => 'EXISTS'],
+        ['key' => 'music128', 'compare' => 'EXISTS'],
+    ],
     'no_found_rows'  => true,
 ]);
 
@@ -559,8 +685,13 @@ foreach ($posts as $p) {
         'post' => $p, 'link320' => $link320, 'link128' => $link128, 'on_host' => $on_host,
         'h320' => $h320, 'h128' => $h128, 'ok320' => $ok320, 'ok128' => $ok128, 'missing' => $is_missing,
         'info' => $info, 'failed_meta' => (string) get_post_meta($p->ID, '_bm_download_failed', true),
-        'has_media' => get_post_meta($p->ID, '_bm_media_urls', true) !== '', 'source' => dlr_source_url($p->ID),
+        'partial_meta' => (string) get_post_meta($p->ID, '_bm_download_partial', true),
+        'hint' => dlr_permanent_hint($info),
+        'saved_media' => dlr_saved_media($p->ID), 'source' => dlr_source_url($p->ID),
     ];
+    // غیرقابل‌ترمیم با ربات: فایل در مبدأ نیست/خراب است، یا صفحه‌ی مبدأ اصلاً لینک فایل آهنگ نداشته (آلبوم/ویدیو)
+    $last = count($rows) - 1;
+    $rows[$last]['unfixable'] = $rows[$last]['hint']['permanent'] || (is_array($rows[$last]['saved_media']) && !$rows[$last]['saved_media']['has_file']);
 }
 ?>
 <div class="box">
@@ -576,17 +707,22 @@ foreach ($posts as $p) {
     <?php wp_nonce_field('bm_dl_repair'); ?>
     <div class="toolbar">
       <button type="submit" onclick="return confirm('فایل‌های پست‌های تیک‌خورده دوباره از مبدأ به هاست دانلود منتقل می‌شود. ادامه می‌دهید؟');">انتقال دوباره‌ی پست‌های تیک‌خورده</button>
-      <label><input type="checkbox" onclick="document.querySelectorAll('input[name=\'repair[]\']').forEach(c=>c.checked=this.checked)"> همه</label>
-      <small class="muted">پیش‌فرض: پست‌هایی که فایلشان روی هاست نیست تیک خورده‌اند. اگر «لینک مبدأ» خالی است، لینک صفحه‌ی آهنگ در mybia2music را بنویسید.</small>
+      <button type="submit" name="trash" value="1" class="btn gray" onclick="return confirm('پیش‌نویس‌های تیک‌خورده به زباله‌دان وردپرس می‌روند (پست‌های منتشرشده دست نمی‌خورند؛ از زباله‌دان قابل بازگردانی است). ادامه می‌دهید؟');">پیش‌نویس‌های تیک‌خورده → زباله‌دان</button>
+      <label><input type="checkbox" onclick="document.querySelectorAll('input[name=\'repair[]\']:not(:disabled)').forEach(c=>c.checked=this.checked)"> همه</label>
+      <label title="پست‌هایی که فایلشان در مبدأ هم نیست (برای زباله‌دان)"><input type="checkbox" onclick="document.querySelectorAll('input[name=\'repair[]\'][data-permanent=\'1\']:not(:disabled)').forEach(c=>c.checked=this.checked)"> فقط غیرقابل‌ترمیم‌ها</label>
+      <small class="muted">پیش‌فرض: پست‌هایی که فایلشان روی هاست نیست و انتقال دوباره برایشان معنی دارد تیک خورده‌اند؛ پستی که فایلش در مبدأ هم نیست تیک ندارد (برای زباله‌دان خودتان تیک بزنید). اگر پستی فقط یک کیفیت دارد، همان کافی است و منتشر می‌شود. اگر «لینک مبدأ» خالی است، لینک صفحه‌ی آهنگ در mybia2music را بنویسید.</small>
     </div>
     <table>
       <tr><th></th><th>پست</th><th>تاریخ</th><th>وضعیت</th><th>فایل 320</th><th>فایل 128</th><th>آخرین پاسخ هاست دانلود</th><th style="width:260px">لینک مبدأ</th></tr>
       <?php foreach ($rows as $r) : $p = $r['post']; ?>
       <tr>
-        <td><input type="checkbox" name="repair[]" value="<?php echo (int) $p->ID; ?>" <?php echo ($r['missing'] || ($p->post_status === 'draft' && $r['failed_meta'] !== '')) ? 'checked' : ''; ?> <?php echo $r['on_host'] ? '' : 'disabled title="لینک روی هاست دانلود ما نیست"'; ?>></td>
+        <td><input type="checkbox" name="repair[]" value="<?php echo (int) $p->ID; ?>" data-permanent="<?php echo $r['unfixable'] ? '1' : '0'; ?>" <?php echo (!$r['unfixable'] && ($r['missing'] || ($p->post_status === 'draft' && $r['failed_meta'] !== ''))) ? 'checked' : ''; ?> <?php echo $r['on_host'] ? '' : 'disabled title="لینک روی هاست دانلود ما نیست"'; ?>></td>
         <td><a href="<?php echo esc_url(get_permalink($p)); ?>" target="_blank"><?php echo dlr_h($p->post_title); ?></a><br><small class="muted">ID <?php echo (int) $p->ID; ?></small></td>
         <td><small><?php echo dlr_h(get_date_from_gmt($p->post_date_gmt, 'Y-m-d H:i')); ?></small></td>
-        <td><?php echo $p->post_status === 'publish' ? 'منتشرشده' : '<span class="warn">پیش‌نویس</span>'; ?><?php echo $r['failed_meta'] !== '' ? '<br><small class="bad">انتقال ناموفق ' . dlr_h($r['failed_meta']) . '</small>' : ''; ?></td>
+        <td><?php echo $p->post_status === 'publish' ? 'منتشرشده' : '<span class="warn">پیش‌نویس</span>'; ?><?php
+            echo $r['failed_meta'] !== '' ? '<br><small class="bad">انتقال ناموفق ' . dlr_h($r['failed_meta']) . '</small>' : '';
+            echo $r['partial_meta'] !== '' ? '<br><small class="warn" title="' . dlr_h($r['partial_meta']) . '">ناقص: ' . dlr_h(mb_substr($r['partial_meta'], 0, 60)) . '</small>' : '';
+        ?></td>
         <?php foreach (['320', '128'] as $q) : $ok = $r['ok' . $q]; $h = $r['h' . $q]; $lnk = $r['link' . $q]; ?>
         <td><?php
             if ($lnk === '') {
@@ -607,9 +743,17 @@ foreach ($posts as $p) {
                 echo '<span class="muted">ثبت نشده</span>';
             } else {
                 echo '<span class="' . ($r['info']['ok'] ? 'ok' : 'bad') . '">' . ($r['info']['ok'] ? 'گفته انجام شد' : 'خطا') . '</span> ' . dlr_h(mb_substr($r['info']['summary'], 0, 300));
+                if ($r['hint']['permanent']) {
+                    echo '<br><b class="bad">' . dlr_h($r['hint']['text']) . '</b> — یا فایل را با پست‌ساز دستی بدهید یا پیش‌نویس را به زباله‌دان بفرستید';
+                } elseif ($r['hint']['text'] !== '' && $r['partial_meta'] !== '') {
+                    echo '<br><b class="warn">پست با همان کیفیت موجود منتشر شده؛ کیفیت دیگر در مبدأ نیست یا خراب است</b>';
+                } elseif ($r['hint']['text'] !== '') {
+                    echo '<br><b class="warn">' . dlr_h($r['hint']['text']) . '</b>';
+                }
             }
         ?></small></td>
-        <td><?php if ($r['has_media']) : ?><small class="ok">لینک‌های مبدأ روی پست هست</small>
+        <td><?php if (is_array($r['saved_media']) && $r['saved_media']['has_file']) : ?><small class="ok">لینک‌های مبدأ روی پست هست</small>
+            <?php elseif (is_array($r['saved_media'])) : ?><small class="warn" title="<?php echo dlr_h($r['saved_media']['source']); ?>">صفحه‌ی مبدأ لینک فایل آهنگ نداشت (آلبوم/ویدیو؟) — این پست را ربات نمی‌تواند درست کند؛ با پست‌ساز ثبت کنید و این پیش‌نویس را به زباله‌دان بفرستید</small>
             <?php elseif ($r['source'] !== '') : ?><small class="muted" title="<?php echo dlr_h($r['source']); ?>">از API با: <?php echo dlr_h(mb_substr($r['source'], 0, 60)); ?></small>
             <?php else : ?><input type="text" name="source[<?php echo (int) $p->ID; ?>]" placeholder="https://www.mybia2music.com/...">
             <?php endif; ?></td>

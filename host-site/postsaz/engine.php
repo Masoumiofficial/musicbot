@@ -1020,8 +1020,8 @@ function ps_dl_file_text(array $file) {
  * ====================================================== */
 
 /**
- * اگر کاربر انتشار خواسته و فایل‌ها سالم منتقل شده‌اند پست منتشر می‌شود؛
- * اگر انتقال فایل خطا داشت پست پیش‌نویس می‌ماند تا بعد از رفع مشکل از پیشخوان منتشر شود.
+ * اگر کاربر انتشار خواسته و فایل‌ها سالم منتقل شده‌اند پست منتشر می‌شود (برای تک‌آهنگ، رسیدن دست‌کم یکی از دو کیفیت کافی است)؛
+ * اگر هیچ فایلی منتقل نشد پست پیش‌نویس می‌ماند تا بعد از رفع مشکل از پیشخوان منتشر شود.
  */
 function ps_finish(array &$report, $post_id, $want_publish, $files_ok) {
     $report['link']      = get_permalink($post_id);
@@ -1032,7 +1032,7 @@ function ps_finish(array &$report, $post_id, $want_publish, $files_ok) {
         return;
     }
     if (!$files_ok) {
-        ps_row($report, 'وضعیت', 'پیش‌نویس ماند — انتقال فایل‌ها به هاست دانلود کامل نشد؛ بعد از رفع مشکل از پیشخوان منتشر کنید', 'error');
+        ps_row($report, 'وضعیت', 'پیش‌نویس ماند — انتقال فایل‌ها به هاست دانلود انجام نشد؛ بعد از رفع مشکل از پیشخوان منتشر کنید', 'error');
         return;
     }
 
@@ -1176,19 +1176,39 @@ function ps_run_single() {
     ps_store_dl_response($post_id, $response);
 
     ps_row($report, 'پوشه‌ی هاست دانلود', $names['dl_dir']);
-    if ($response['success']) {
+    $files_ok = (bool) $response['success'];
+    if ($files_ok) {
+        bm_set_download_state($post_id, 'ok');
         ps_row($report, 'انتقال فایل‌ها', 'انجام شد' . ($m320['url'] !== '' ? ' — 320' : '') . ($m128['url'] !== '' ? ' — 128' : ''));
     } else {
-        ps_row($report, 'انتقال فایل‌ها', 'ناموفق: ' . ps_dl_error_text($response), 'error');
+        // فقط یکی از دو کیفیت رسیده؟ (مثلاً لینک 320 مبدأ خراب بود) → همان کافی است: لینک کیفیت نرسیده از پست برداشته
+        // و پست با کیفیت موجود منتشر می‌شود (همان قاعده‌ی ربات؛ bm_sync_music_metas در bot/script.php)
+        $landed = is_array($response['json']) && !empty($response['json']['files']) && is_array($response['json']['files'])
+            ? bm_dl_landed(['files' => $response['json']['files']])
+            : null;
+        $have = ['320' => is_array($landed) && $landed['320'] === true, '128' => is_array($landed) && $landed['128'] === true];
+        if ($have['320'] || $have['128']) {
+            $sync     = bm_sync_music_metas($post_id, $have, ['320' => $url320, '128' => $url128]);
+            $files_ok = $sync['usable'];
+            bm_set_download_state($post_id, 'partial', $sync['label'] . ' — ' . ps_dl_error_text($response));
+            ps_row($report, 'انتقال فایل‌ها', 'ناقص — ' . $sync['label'] . ' روی هاست نشست و پست با همان قابل استفاده است: ' . ps_dl_error_text($response)
+                . (!empty($sync['changes']) ? ' — ' . implode('؛ ', $sync['changes']) : ''), 'warn');
+        } else {
+            bm_set_download_state($post_id, 'failed');
+            ps_row($report, 'انتقال فایل‌ها', 'ناموفق: ' . ps_dl_error_text($response), 'error');
+        }
     }
-    if ($url320 !== '') {
-        $report['links'][] = ['label' => 'MP3 320', 'url' => $url320];
+    // لینک‌های گزارش از روی متاهای نهایی پست (کیفیتی که نرسیده، لینک ندارد)
+    $final320 = (string) get_post_meta($post_id, 'music320', true);
+    $final128 = (string) get_post_meta($post_id, 'music128', true);
+    if ($final320 !== '') {
+        $report['links'][] = ['label' => 'MP3 320', 'url' => $final320];
     }
-    if ($url128 !== '') {
-        $report['links'][] = ['label' => 'MP3 128', 'url' => $url128];
+    if ($final128 !== '' && $final128 !== $final320) {
+        $report['links'][] = ['label' => 'MP3 128', 'url' => $final128];
     }
 
-    ps_finish($report, $post_id, $want_publish, $response['success']);
+    ps_finish($report, $post_id, $want_publish, $files_ok);
     return $report;
 }
 

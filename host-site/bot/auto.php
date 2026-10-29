@@ -18,6 +18,9 @@
  * اگر ثبت آیتمی با خطا تمام شود (مثلاً API در دسترس نباشد) وضعیتش failed می‌شود و فقط وقتی
  * آیتم جدیدی در فید نباشد، حداکثر $max_attempts بار دوباره امتحان می‌شود؛ یعنی یک آیتم خراب
  * جلوی آهنگ‌های جدید را نمی‌گیرد و یک قطعی موقت هم باعث از دست رفتن آهنگ نمی‌شود.
+ * ربات فقط تک‌آهنگ ثبت می‌کند: آیتم‌های آلبوم / موزیک ویدیو / پلی‌لیست فید (از روی عنوان «دانلود آلبوم …»،
+ * «دانلود موزیک ویدیو …» یا نامک لینک) بدون تماس با API با وضعیت skipped کنار گذاشته می‌شوند و اگر صفحه‌ای
+ * لینک فایل آهنگ نداشت (script.php قبل از ساختن پست متوجه می‌شود) هم skipped می‌شود — این‌ها را با پست‌ساز بفرستید.
  */
 include("config.php");
 require_once __DIR__ . '/auth.php';
@@ -107,6 +110,30 @@ function bm_auto_stop($message) {
 }
 
 /**
+ * آیتم‌هایی که ربات نمی‌تواند ثبت کند (فقط تک‌آهنگ ثبت می‌شود): آلبوم، موزیک ویدیو، پلی‌لیست
+ * از عنوان فید («دانلود آلبوم …»، «دانلود موزیک ویدیو …») و نامک لینک (…-album، …-video، /playlist/) تشخیص داده می‌شود.
+ * خروجی: '' (قابل ثبت) یا نام نوع برای گزارش
+ */
+function bm_auto_item_kind($title, $url) {
+    $title = trim(html_entity_decode((string) $title, ENT_QUOTES, 'UTF-8'));
+    $path  = strtolower((string) parse_url((string) $url, PHP_URL_PATH));
+
+    if (preg_match('#^(?:دانلود\s+)?(آلبوم|موزیک\s*وید[یئ]و|وید[یئ]و\s*کلیپ|پلی\s*‌?لیست)#u', $title, $m)) {
+        return preg_replace('/\s+/u', ' ', $m[1]);
+    }
+    if (preg_match('#-album(?:-\d+)?/?$#', $path)) {
+        return 'آلبوم';
+    }
+    if (preg_match('#(?:^|[-/])(?:music-)?video(?:-\d+)?/?$#', $path)) {
+        return 'موزیک ویدیو';
+    }
+    if (strpos($path, '/playlist') !== false) {
+        return 'پلی‌لیست';
+    }
+    return '';
+}
+
+/**
  * بعد از پایان اجرا (حتی اگر script.php با exit یا خطا تمام شده باشد):
  * آزاد کردن قفل، ثبت وضعیت آیتم و چاپ خلاصه
  */
@@ -124,6 +151,10 @@ function bm_auto_finish() {
         if (!empty($job['done'])) {
             $wpdb->update($job['table'], ['status' => 'done', 'post_id' => (int) $job['post_id']], ['url' => $job['url']]);
             $line = 'ثبت شد: ' . $job['title'] . ' (پست ' . (int) $job['post_id'] . ')';
+        } elseif (!empty($job['skipped'])) {
+            // script.php قبل از ساختن پست فهمیده صفحه لینک فایل آهنگ ندارد (آلبوم/ویدیو) → دیگر تکرار نمی‌شود
+            $wpdb->update($job['table'], ['status' => 'skipped'], ['url' => $job['url']]);
+            $line = 'رد شد: ' . $job['title'] . ' — ' . $job['skipped'];
         } else {
             $wpdb->update($job['table'], ['status' => 'failed'], ['url' => $job['url']]);
             $attempts = (int) $job['attempts'];
@@ -242,6 +273,29 @@ foreach ((array) $rows as $row) {
     $seen[$row->url] = $row;
 }
 
+// آلبوم / موزیک ویدیو / پلی‌لیست: بدون تماس با API کنار گذاشته می‌شود (status = skipped) تا آیتم بعدی فید نوبت بگیرد
+$skipped_now = [];
+foreach ($items as $url => $title) {
+    if (isset($seen[$url])) {
+        continue;
+    }
+    $kind = bm_auto_item_kind($title, $url);
+    if ($kind === '') {
+        continue;
+    }
+    $wpdb->insert($subcheck_table, [
+        'url'        => $url,
+        'status'     => 'skipped',
+        'attempts'   => 0,
+        'created_at' => current_time('mysql'),
+    ]);
+    $seen[$url]    = (object) ['url' => $url, 'status' => 'skipped', 'attempts' => 0];
+    $skipped_now[] = $title . ' (' . $kind . ')';
+}
+if (!empty($skipped_now)) {
+    echo '<p>رد شد (ربات فقط تک‌آهنگ ثبت می‌کند؛ با پست‌ساز بفرستید): ' . implode('، ', $skipped_now) . '</p>';
+}
+
 $candidate = null;
 $retry     = false;
 
@@ -263,7 +317,7 @@ if ($candidate === null) {
 }
 
 if ($candidate === null) {
-    bm_auto_stop('آیتم جدیدی در فید نبود (' . count($items) . ' آیتم بررسی شد).');
+    bm_auto_stop('آیتم جدیدی در فید نبود (' . count($items) . ' آیتم بررسی شد' . (!empty($skipped_now) ? '؛ ' . count($skipped_now) . ' آیتم آلبوم/ویدیو رد شد' : '') . ').');
 }
 
 if ($retry) {
