@@ -1,15 +1,22 @@
 <?php
 
 /* -------------------------------------------------------
- |  آدرس‌ها
- |  $urlsite : آدرس سایت. خالی = خودکار از تنظیمات وردپرس (home_url)؛ با تغییر دامنه‌ی سایت نیازی به ویرایش این‌جا نیست.
- |  $urldlhost / $functions_dl_music : هاست دانلود (دامنه‌ی جدا). اگر دامنه‌ی هاست دانلود عوض شد، این دو خط و
- |  postsaz/config.php را عوض کنید و لینک‌های دانلود پست‌های قدیمی را با bot/domain-tool.php (بخش «تعویض دامنه‌ی
- |  لینک‌های دانلود») به دامنه‌ی جدید ببرید.
+ |  آدرس‌ها — همه خودکار؛ با تغییر دامنه‌ی سایت (ahangban.ir → ahangban.com) نیازی به ویرایش این فایل نیست
+ |  $urlsite            : آدرس سایت. خالی = خودکار از تنظیمات وردپرس (home_url).
+ |  $urldlhost          : هاست دانلود. خالی = خودکار: «dl.» + دامنه‌ی سایت بدون www
+ |                        (ahangban.ir → https://dl.ahangban.ir ، ahangban.com → https://dl.ahangban.com).
+ |                        اگر هاست دانلود جدید این قاعده را ندارد، به‌جای نوشتن این‌جا در wp-config.php بنویسید:
+ |                        define('AHANGBAN_DL_HOST', 'https://files.example.com');
+ |                        (افزونه‌ی ahangban-seo هم همان را می‌خواند؛ پس ربات و خروجی سایت یک هاست دانلود می‌بینند.)
+ |  $functions_dl_music : گیرنده‌ی تک‌آهنگ روی هاست دانلود. خالی = خودکار: {$urldlhost}/music.php
+ |  $bot_dl_subdomain   : پیشوند ساب‌دامین در حالت خودکار («dl»)
+ |  لینک‌های دانلود پست‌های قدیمی بعد از تغییر هاست دانلود: define('AHANGBAN_OLD_DL_HOSTS', 'dl.ahangban.ir') در
+ |  wp-config.php (نمایش فوری روی هاست جدید) + bot/domain-tool.php بخش «تعویض دامنه‌ی لینک‌های دانلود» (دائمی).
  * ------------------------------------------------------ */
 $urlsite = "";
-$urldlhost = "https://dl.ahangban.ir";
-$functions_dl_music = "https://dl.ahangban.ir/music.php";
+$urldlhost = "";
+$functions_dl_music = "";
+$bot_dl_subdomain = "dl";
 
 /* -------------------------------------------------------
  |  ورود به پنل ربات (HTTP Basic Auth)

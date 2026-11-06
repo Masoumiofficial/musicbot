@@ -291,8 +291,15 @@ if (!is_array($dt_state)) {
 $dt_origin     = bm_site_origin();
 $dt_home_host  = strtolower((string) parse_url($dt_origin, PHP_URL_HOST));
 $dt_home_hosts = bm_internal_hosts();
-$dt_dl_origin  = !empty($urldlhost) ? rtrim((string) $urldlhost, '/') : '';
+$dt_dl_origin  = bm_dl_origin(); // config.php یا AHANGBAN_DL_HOST یا خودکار (dl. + دامنه‌ی سایت)
 $dt_dl_host    = strtolower((string) parse_url($dt_dl_origin, PHP_URL_HOST));
+$dt_dl_sources = ['config' => 'config.php ($urldlhost)', 'constant' => 'AHANGBAN_DL_HOST در wp-config.php', 'auto' => 'خودکار: dl. + دامنه‌ی سایت', 'none' => 'تنظیم نشده'];
+$dt_dl_source  = isset($GLOBALS['bm_dl_source'], $dt_dl_sources[$GLOBALS['bm_dl_source']]) ? $dt_dl_sources[$GLOBALS['bm_dl_source']] : '';
+// هاست دانلود از دید افزونه‌ی خروجی (ahangban-seo) — باید با ربات یکی باشد
+$dt_plugin_dl  = function_exists('ahangban_dl_origin') ? (string) ahangban_dl_origin() : '';
+// هاست‌های دانلود قدیمی (AHANGBAN_OLD_DL_HOSTS در wp-config.php): افزونه در لحظه‌ی خواندن آن‌ها را به هاست فعلی می‌برد
+$dt_old_dl     = defined('AHANGBAN_OLD_DL_HOSTS') ? array_values(array_diff(dt_hosts_from_input(AHANGBAN_OLD_DL_HOSTS), [$dt_dl_host])) : [];
+$dt_old_site   = defined('AHANGBAN_OLD_HOSTS') ? array_values(array_diff(dt_hosts_from_input(AHANGBAN_OLD_HOSTS), $dt_home_hosts)) : [];
 $dt_labels     = ['relative' => 'نسبی‌سازی لینک‌های داخلی', 'absolute' => 'بازگشت به لینک کامل', 'swap' => 'تعویض دامنه در متن پست‌ها'];
 
 header('Content-Type: text/html; charset=utf-8');
@@ -423,7 +430,11 @@ if (!$dt_running || !$dt_more) {
         if ($total === 0) {
             continue;
         }
-        $dt_report['meta'][$key] = ['total' => $total, 'current' => $dt_dl_host !== '' ? dt_meta_count($key, $dt_dl_host) : 0];
+        $old_n = 0;
+        foreach ($dt_old_dl as $old_host) {
+            $old_n += dt_meta_count($key, $old_host);
+        }
+        $dt_report['meta'][$key] = ['total' => $total, 'current' => $dt_dl_host !== '' ? dt_meta_count($key, $dt_dl_host) : 0, 'old' => $old_n];
     }
 }
 $dt_processed = (int) (isset($dt_state['scanned']) ? $dt_state['scanned'] : 0);
@@ -470,7 +481,16 @@ ol li{margin-bottom:6px}
     <a class="btn gray" href="meta-compare.php">مقایسه‌ی متاها</a>
   </div>
   <p class="muted" style="margin:0"><small>
-    دامنه‌ی فعلی سایت: <code><?php echo dt_h($dt_origin); ?></code> — هاست دانلود (config.php): <code><?php echo $dt_dl_origin !== '' ? dt_h($dt_dl_origin) : '—'; ?></code>
+    دامنه‌ی فعلی سایت: <code><?php echo dt_h($dt_origin); ?></code> — هاست دانلود: <code><?php echo $dt_dl_origin !== '' ? dt_h($dt_dl_origin) : '—'; ?></code><?php echo $dt_dl_source !== '' ? ' (' . dt_h($dt_dl_source) . ')' : ''; ?>
+    <?php if ($dt_plugin_dl !== '' && strtolower($dt_plugin_dl) !== strtolower($dt_dl_origin)) : ?>
+    — <span class="bad">افزونه‌ی ahangban-seo هاست دانلود را <code><?php echo dt_h($dt_plugin_dl); ?></code> می‌داند؛ با ربات یکی نیست. <code>$urldlhost</code> را در config.php خالی بگذارید و اگر قاعده‌ی «dl. + دامنه» درست نیست، <code>AHANGBAN_DL_HOST</code> را در wp-config.php تعریف کنید.</span>
+    <?php endif; ?>
+    <?php if (!empty($dt_old_dl)) : ?>
+    — هاست‌های دانلود قدیمی (AHANGBAN_OLD_DL_HOSTS): <code><?php echo dt_h(implode('، ', $dt_old_dl)); ?></code> <span class="ok">→ در لحظه‌ی خواندن متا و در خروجی متن به هاست فعلی می‌روند؛ برای دائمی‌شدن مورد ۴ را اجرا کنید</span>
+    <?php endif; ?>
+    <?php if (!empty($dt_old_site)) : ?>
+    — دامنه‌های قدیمی سایت (AHANGBAN_OLD_HOSTS): <code><?php echo dt_h(implode('، ', $dt_old_site)); ?></code>
+    <?php endif; ?>
     — لینک‌های داخلی پست‌های تازه: <?php echo bm_relative_links_enabled() ? '<span class="ok">بدون دامنه ($bot_relative_links = true)</span>' : '<span class="warn">با دامنه ($bot_relative_links = false)</span>'; ?>
     — تغییرها مستقیم در دیتابیس نوشته می‌شود (بدون هوک save_post و بدون تغییر تاریخ ویرایش). پیش از اجرای واقعی پشتیبان بگیرید.
   </small></p>
@@ -589,16 +609,19 @@ ol li{margin-bottom:6px}
     <div class="card">
       <h3 style="margin-top:0">لینک‌های دانلود (متاها)</h3>
       <table>
-        <tr><th>کلید</th><th>ردیف‌های غیرخالی</th><th>روی <?php echo dt_h($dt_dl_host !== '' ? $dt_dl_host : 'هاست دانلود'); ?></th></tr>
+        <tr><th>کلید</th><th>ردیف‌های غیرخالی</th><th>روی <?php echo dt_h($dt_dl_host !== '' ? $dt_dl_host : 'هاست دانلود'); ?></th><?php if (!empty($dt_old_dl)) : ?><th>روی هاست قدیمی (<?php echo dt_h(implode('، ', $dt_old_dl)); ?>)</th><?php endif; ?></tr>
         <?php foreach ($dt_report['meta'] as $key => $m) : ?>
-        <tr><td><code><?php echo dt_h($key); ?></code></td><td><?php echo (int) $m['total']; ?></td><td class="<?php echo $m['current'] === $m['total'] ? 'ok' : 'warn'; ?>"><?php echo (int) $m['current']; ?></td></tr>
+        <tr><td><code><?php echo dt_h($key); ?></code></td><td><?php echo (int) $m['total']; ?></td><td class="<?php echo $m['current'] === $m['total'] ? 'ok' : 'warn'; ?>"><?php echo (int) $m['current']; ?></td><?php if (!empty($dt_old_dl)) : ?><td class="<?php echo $m['old'] > 0 ? 'warn' : 'ok'; ?>"><?php echo (int) $m['old']; ?></td><?php endif; ?></tr>
         <?php endforeach; ?>
-        <?php if (empty($dt_report['meta'])) : ?><tr><td colspan="3" class="muted">متایی پیدا نشد.</td></tr><?php endif; ?>
+        <?php if (empty($dt_report['meta'])) : ?><tr><td colspan="<?php echo !empty($dt_old_dl) ? 4 : 3; ?>" class="muted">متایی پیدا نشد.</td></tr><?php endif; ?>
       </table>
       <?php if (!empty($dt_report['meta_other'])) : ?>
       <p><small>میزبان‌های دیگر در این متاها (نمونه‌ی ۲۰۰۰ ردیف آخر): <?php $parts = []; foreach ($dt_report['meta_other'] as $h => $n) { $parts[] = '<code>' . dt_h($h) . '</code> ' . (int) $n; } echo implode('، ', $parts); ?></small></p>
       <?php elseif ($dt_dl_host !== '') : ?>
       <p class="ok"><small>همه‌ی لینک‌های دانلود روی هاست دانلود فعلی‌اند.</small></p>
+      <?php endif; ?>
+      <?php if (!empty($dt_old_dl)) : ?>
+      <p class="muted"><small>ستون «هاست قدیمی» مقدار واقعی دیتابیس است؛ بازدیدکننده‌ها همین الان (به لطف AHANGBAN_OLD_DL_HOSTS) لینک را روی <code><?php echo dt_h($dt_dl_host); ?></code> می‌بینند. مورد ۴ آن را دائمی می‌کند.</small></p>
       <?php endif; ?>
     </div>
     <div class="card">
@@ -665,9 +688,9 @@ ol li{margin-bottom:6px}
         <input type="hidden" name="action" value="swap">
         <input type="hidden" name="fresh" value="1">
         <label>دامنه‌ی قدیمی (هر خط یکی)</label>
-        <textarea name="hosts"><?php echo dt_h($dt_dl_host); ?></textarea>
+        <textarea name="hosts"><?php echo dt_h(!empty($dt_old_dl) ? implode("\n", $dt_old_dl) : $dt_dl_host); ?></textarea>
         <label>دامنه‌ی جدید (با https://)</label>
-        <input type="text" class="ltr" name="target" value="" placeholder="https://dl.ahangban.com">
+        <input type="text" class="ltr" name="target" value="<?php echo !empty($dt_old_dl) ? dt_h($dt_dl_origin) : ''; ?>" placeholder="https://dl.ahangban.com">
         <div class="row" style="margin-top:8px">
           <label><input type="checkbox" name="types[]" value="post" checked> نوشته‌ها</label>
           <label><input type="checkbox" name="types[]" value="page" checked> برگه‌ها</label>
@@ -679,12 +702,12 @@ ol li{margin-bottom:6px}
     </div>
     <div class="card">
       <h3 style="margin-top:0">۴) تعویض دامنه‌ی لینک‌های دانلود (متاها)</h3>
-      <p class="muted"><small>مقدار متاهایی که با <code>https://دامنه‌ی-قدیمی/</code> (یا http، //) شروع می‌شوند → <code>دامنه‌ی-جدید/…</code>؛ یک UPDATE برای هر کلید، در چند ثانیه. اول فایل‌ها را روی هاست جدید بگذارید و <code>$urldlhost</code> را در config.php عوض کنید.</small></p>
+      <p class="muted"><small>مقدار متاهایی که با <code>https://دامنه‌ی-قدیمی/</code> (یا http، //) شروع می‌شوند → <code>دامنه‌ی-جدید/…</code>؛ یک UPDATE برای هر کلید، در چند ثانیه. اول فایل‌ها باید روی هاست جدید در دسترس باشند (هاست دانلود ربات الان: <code><?php echo dt_h($dt_dl_origin !== '' ? $dt_dl_origin : '—'); ?></code>؛ با <code>dl-repair.php?ping=1</code> امتحان کنید).</small></p>
       <form method="post">
         <?php wp_nonce_field('bm_domain_tool'); ?>
         <input type="hidden" name="action" value="meta_swap">
         <label>دامنه‌ی قدیمی</label>
-        <input type="text" class="ltr" name="old_host" value="<?php echo dt_h($dt_dl_host); ?>">
+        <input type="text" class="ltr" name="old_host" value="<?php echo dt_h(!empty($dt_old_dl) ? $dt_old_dl[0] : $dt_dl_host); ?>">
         <label>دامنه‌ی جدید (با https://)</label>
         <input type="text" class="ltr" name="target" value="<?php echo dt_h($dt_dl_origin); ?>">
         <label>کلیدهای متا (با فاصله؛ % = الگوی ردیف‌های آلبوم)</label>
@@ -703,13 +726,18 @@ ol li{margin-bottom:6px}
   <ol>
     <li><b>پیش از همه، همین الان:</b> مورد ۱ را روی همه‌ی پست‌ها اجرا کنید تا لینک‌های داخلی متن پست‌ها بدون دامنه شوند؛ از آن به بعد ربات و پست‌ساز هم همین‌طور می‌نویسند. در روز تغییر دامنه دیگر هیچ کاری برای متن پست‌ها لازم نیست.</li>
     <li>دامنه‌ی جدید را به همین هاست وصل کنید (DNS + SSL)؛ دامنه‌ی قدیمی را هم دست‌کم یک سال نگه دارید.</li>
-    <li>در <code>wp-config.php</code>: <code>define('WP_HOME', 'https://ahangban.com'); define('WP_SITEURL', 'https://ahangban.com');</code> و <code>define('AHANGBAN_OLD_HOSTS', 'ahangban.ir');</code> (افزونه‌ی ahangban-seo لینک‌های مطلقِ جامانده‌ی دامنه‌ی قدیمی را در خروجی به دامنه‌ی جدید برمی‌گرداند).</li>
+    <li>در <code>wp-config.php</code>: <code>define('WP_HOME', 'https://ahangban.com'); define('WP_SITEURL', 'https://ahangban.com');</code> و <code>define('AHANGBAN_OLD_HOSTS', 'ahangban.ir');</code> (افزونه‌ی ahangban-seo لینک‌های مطلقِ جامانده‌ی دامنه‌ی قدیمی را در خروجی به دامنه‌ی جدید برمی‌گرداند) و اگر هاست دانلود هم عوض شده <code>define('AHANGBAN_OLD_DL_HOSTS', 'dl.ahangban.ir');</code> (مورد ۵).</li>
     <li>تنظیمات قالب، ابزارک‌ها، فهرست‌ها، Rank Math، المنتور و … (سریالایزشده در <code>wp_options</code>/<code>wp_postmeta</code>): با افزونه‌ی <b>Better Search Replace</b> (اول Dry run) یا <code>wp search-replace 'https://ahangban.ir' 'https://ahangban.com' --all-tables --precise</code>؛ همین را برای <code>http://ahangban.ir</code> و حالت JSON <code>https:\/\/ahangban.ir</code> (المنتور) هم بزنید. این ابزار این جدول‌ها را دست نمی‌زند.</li>
-    <li>هاست دانلود: اگر <code>dl.ahangban.ir</code> هم عوض می‌شود، فایل‌ها را به هاست/دامنه‌ی جدید ببرید، <code>$urldlhost</code> و <code>$functions_dl_music</code> در <code>bot/config.php</code> و گیرنده‌ها در <code>postsaz/config.php</code> را عوض کنید، بعد مورد ۴ (متاها) و مورد ۳ (لینک‌های دانلود داخل متن، اگر هست) را اجرا کنید. اگر هاست دانلود همان می‌ماند، هیچ‌کدام لازم نیست.</li>
-    <li>ریدایرکت ۳۰۱ دامنه‌ی قدیمی به جدید با حفظ مسیر — برای سایت و برای هاست دانلود (لینک‌های قدیمی تلگرام/گوگل زنده می‌مانند):
+    <li><b>هاست دانلود</b> (<code>dl.ahangban.ir → dl.ahangban.com</code>): فایل‌های روی هاست دانلود (<code>/music/…</code>، <code>/album/…</code>، <code>hostdl/*.php</code>) هیچ دامنه‌ای در خود ندارند — کافی است در DirectAdmin هاست دانلود، دامنه‌ی <code>dl.ahangban.com</code> را با همان پوشه‌ی <code>public_html</code> بسازید (یا پوشه را منتقل کنید) + SSL. ربات خودش هاست دانلود را «dl. + دامنه‌ی سایت» می‌گیرد (<code>$urldlhost</code> در config.php خالی بماند؛ اگر هاست جدید این قاعده را ندارد <code>define('AHANGBAN_DL_HOST', 'https://…')</code> در wp-config). سپس در wp-config: <code>define('AHANGBAN_OLD_DL_HOSTS', 'dl.ahangban.ir');</code> → از همان لحظه لینک‌های دانلود همه‌ی پست‌های قدیمی روی هاست جدید نمایش داده می‌شوند. بعد با خیال راحت مورد ۴ (متاها) و اگر لینک دانلود داخل متن هست مورد ۳ را اجرا کنید تا دائمی شود؛ <code>dl-repair.php?ping=1</code> هم اتصال ربات به هاست جدید را نشان می‌دهد. اگر هاست دانلود همان می‌ماند، هیچ‌کدام لازم نیست.</li>
+    <li>ریدایرکت ۳۰۱ دامنه‌ی قدیمی به جدید با حفظ مسیر — برای سایت و همین‌طور روی هاست دانلود قدیمی (لینک‌های قدیمی تلگرام/گوگل زنده می‌مانند):
 <pre>RewriteEngine On
 RewriteCond %{HTTP_HOST} ^(www\.)?ahangban\.ir$ [NC]
-RewriteRule ^(.*)$ https://ahangban.com/$1 [R=301,L]</pre></li>
+RewriteRule ^(.*)$ https://ahangban.com/$1 [R=301,L]
+
+# .htaccess هاست دانلود قدیمی
+RewriteEngine On
+RewriteCond %{HTTP_HOST} ^dl\.ahangban\.ir$ [NC]
+RewriteRule ^(.*)$ https://dl.ahangban.com/$1 [R=301,L]</pre></li>
     <li>Search Console: «تغییر آدرس» (Change of Address) از دامنه‌ی قدیمی به جدید، ارسال نقشه‌ی سایت جدید؛ پیوندهای یکتا را یک‌بار ذخیره کنید؛ کش صفحه/CDN را پاک کنید.</li>
     <li>کران‌جاب <code>auto.php</code> را با آدرس جدید تنظیم کنید؛ <code>$urlsite</code> در config.php خالی (خودکار) بماند.</li>
     <li>در پایان همین صفحه را باز کنید: «لینک مطلق به دامنه‌ی خود سایت» باید صفر باشد؛ اگر نبود مورد ۱ را با دامنه‌ی قدیمی در فهرست میزبان‌ها اجرا کنید.</li>

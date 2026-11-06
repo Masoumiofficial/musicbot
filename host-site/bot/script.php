@@ -12,6 +12,10 @@ require_once __DIR__ . '/watermark.php';
 // WebP برای سایزهای نمایشی کاور (فایل اصلی دست‌نخورده می‌ماند؛ تنظیمات $bot_webp_* در config.php)
 require_once __DIR__ . '/webp.php';
 
+// هاست دانلود خودکار: $urldlhost خالی در config.php → AHANGBAN_DL_HOST (wp-config) یا https://dl.<دامنه‌ی سایت>؛
+// $functions_dl_music خالی → {$urldlhost}/music.php — این‌جا (بعد از wp-load) چون به home_url نیاز دارد
+bm_resolve_dl_config();
+
 $dir_wp = date('Y/m');
 
 $arrContextOptions = array(
@@ -771,6 +775,60 @@ function bm_internal_hosts(array $extra = []) {
         $hosts['www.' . $bare] = true;
     }
     return array_keys($hosts);
+}
+
+/* -------------------------------------------------------
+ |  هاست دانلود همراه دامنه‌ی سایت
+ |  $urldlhost خالی (پیش‌فرض) = خودکار: «dl.» + دامنه‌ی سایت بدون www (ahangban.ir → https://dl.ahangban.ir،
+ |  ahangban.com → https://dl.ahangban.com). اگر هاست دانلود جدید این قاعده را ندارد، در wp-config.php:
+ |  define('AHANGBAN_DL_HOST', 'https://files.example.com'); — همین ثابت را افزونه‌ی ahangban-seo هم می‌خواند،
+ |  پس ربات و خروجی سایت همیشه یک هاست دانلود می‌بینند. مقدار غیرخالی $urldlhost در config.php بر همه مقدم است.
+ * ------------------------------------------------------ */
+
+/** هاست دانلود پیش‌فرض (scheme + host، بدون / آخر): AHANGBAN_DL_HOST یا https://{$bot_dl_subdomain}.<دامنه‌ی سایت بدون www> */
+function bm_default_dl_origin() {
+    if (defined('AHANGBAN_DL_HOST') && trim((string) AHANGBAN_DL_HOST) !== '') {
+        $origin = trim((string) AHANGBAN_DL_HOST);
+        if (!preg_match('#^https?://#i', $origin)) {
+            $origin = 'https://' . ltrim($origin, '/');
+        }
+        return rtrim($origin, '/');
+    }
+    $site = bm_site_origin();
+    $host = strtolower((string) parse_url($site, PHP_URL_HOST));
+    if ($host === '') {
+        return '';
+    }
+    $scheme = strtolower((string) parse_url($site, PHP_URL_SCHEME)) === 'http' ? 'http' : 'https';
+    $sub    = isset($GLOBALS['bot_dl_subdomain']) ? trim((string) $GLOBALS['bot_dl_subdomain'], " .\t") : 'dl';
+    $bare   = preg_replace('#^www\.#', '', $host);
+    return $scheme . '://' . ($sub !== '' ? $sub . '.' : '') . $bare;
+}
+
+/**
+ * $urldlhost / $functions_dl_music خالی → مقدار خودکار (در همان متغیرهای سراسری config.php)
+ * $GLOBALS['bm_dl_source'] می‌گوید مقدار از کجا آمده: config | constant | auto | none
+ */
+function bm_resolve_dl_config() {
+    if (!empty($GLOBALS['urldlhost'])) {
+        $GLOBALS['bm_dl_source'] = 'config';
+    } else {
+        $origin = bm_default_dl_origin();
+        $GLOBALS['urldlhost']    = $origin;
+        $GLOBALS['bm_dl_source'] = $origin === '' ? 'none' : ((defined('AHANGBAN_DL_HOST') && trim((string) AHANGBAN_DL_HOST) !== '') ? 'constant' : 'auto');
+    }
+    if (empty($GLOBALS['functions_dl_music']) && !empty($GLOBALS['urldlhost'])) {
+        $GLOBALS['functions_dl_music'] = rtrim((string) $GLOBALS['urldlhost'], '/') . '/music.php';
+    }
+    return (string) $GLOBALS['urldlhost'];
+}
+
+/** هاست دانلود فعلی ربات (scheme + host، بدون / آخر)؛ '' = تنظیم نشده */
+function bm_dl_origin() {
+    if (!isset($GLOBALS['bm_dl_source'])) {
+        bm_resolve_dl_config();
+    }
+    return rtrim((string) $GLOBALS['urldlhost'], '/');
 }
 
 /**
