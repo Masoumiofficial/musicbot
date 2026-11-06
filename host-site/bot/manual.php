@@ -22,7 +22,9 @@ if (!empty($_POST['link'])) {
 
         $permalink = rawurlencode(get_permalink($post_id));
         $my_title = rawurlencode(get_the_title($post_id));
-        $redirect_url = "https://ahangban.ir/bot/robo.php/?q={$permalink}&t={$my_title}";
+        // بدون دامنه (همین پوشه): با تغییر دامنه‌ی سایت چیزی عوض نمی‌شود
+        $bot_base     = rtrim(str_replace('\\', '/', dirname((string) $_SERVER['SCRIPT_NAME'])), '/');
+        $redirect_url = "{$bot_base}/robo.php?q={$permalink}&t={$my_title}";
         
         exit("<script>document.title = 'Redirecting...'; window.location.replace('{$redirect_url}');</script>");
     } else {

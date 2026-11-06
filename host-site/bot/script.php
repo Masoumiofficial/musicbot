@@ -730,6 +730,174 @@ function bm_guess_source_kind($url, $has_video = false) {
     return '';
 }
 
+/* -------------------------------------------------------
+ |  لینک‌های داخلی بدون دامنه (مستقل از دامنه‌ی سایت)
+ |  لینک‌هایی که در متن پست ذخیره می‌شوند («دانلود آهنگ جدید» → /music/ و صفحه‌ی خواننده → /artist/…) با
+ |  $bot_relative_links = true بدون دامنه نوشته می‌شوند تا اگر روزی دامنه عوض شد (ahangban.ir → ahangban.com)
+ |  هیچ‌چیز در دیتابیس نیاز به تغییر نداشته باشد. mu-plugins/ahangban-seo.php در خروجی (صفحه، فید، REST) همین
+ |  لینک‌ها را با دامنه‌ی فعلی کامل می‌کند. پست‌های قدیمی: bot/domain-tool.php
+ |  همین توابع در domain-tool.php برای ویرایش دسته‌ای محتوا استفاده می‌شوند.
+ * ------------------------------------------------------ */
+
+/** آیا لینک‌های داخلی متن پست بدون دامنه ذخیره شوند؟ (config: $bot_relative_links، پیش‌فرض true) */
+function bm_relative_links_enabled() {
+    return !isset($GLOBALS['bot_relative_links']) || !empty($GLOBALS['bot_relative_links']);
+}
+
+/** scheme + host سایت از home_url (بدون مسیر)؛ مثل https://ahangban.ir */
+function bm_site_origin() {
+    $home = function_exists('home_url') ? (string) home_url('/') : '';
+    if ($home === '' && !empty($GLOBALS['urlsite'])) {
+        $home = (string) $GLOBALS['urlsite'];
+    }
+    return preg_match('#^(https?://[^/]+)#i', $home, $m) ? $m[1] : rtrim($home, '/');
+}
+
+/**
+ * نام‌های میزبان که «داخلی» حساب می‌شوند: میزبان home_url با و بدون www (+ میزبان‌های اضافی مثل دامنه‌های قدیمی)
+ */
+function bm_internal_hosts(array $extra = []) {
+    $hosts = [];
+    $home  = strtolower((string) parse_url(bm_site_origin(), PHP_URL_HOST));
+    foreach (array_merge([$home], $extra) as $host) {
+        $host = strtolower(trim((string) $host));
+        $host = preg_replace('#^[a-z]+://#', '', $host);
+        $host = trim((string) preg_replace('#[/?\#].*$#', '', $host), " \t\r\n/");
+        if ($host === '') {
+            continue;
+        }
+        $bare = preg_replace('#^www\.#', '', $host);
+        $hosts[$bare]          = true;
+        $hosts['www.' . $bare] = true;
+    }
+    return array_keys($hosts);
+}
+
+/**
+ * اجرای یک تابع روی مقدار صفت‌های لینک (href، src، poster، data-src) در یک تکه HTML؛ بقیه‌ی متن دست نمی‌خورد
+ * (متن ساده‌ای که آدرس در آن نوشته شده تغییر نمی‌کند — فقط لینک‌های واقعی)
+ */
+function bm_links_rewrite_attrs($html, callable $fn) {
+    if (!is_string($html) || $html === '') {
+        return $html;
+    }
+    return preg_replace_callback(
+        '#(\b(?:href|src|poster|data-src)\s*=\s*)(["\'])(.*?)\2#is',
+        function ($m) use ($fn) {
+            $new = $fn($m[3]);
+            return $m[1] . $m[2] . (is_string($new) ? $new : $m[3]) . $m[2];
+        },
+        $html
+    );
+}
+
+/** الگوی «آدرس مطلق روی یکی از این میزبان‌ها» (http/https/بدون پروتکل، با یا بی‌پورت) تا قبل از مسیر */
+function bm_hosts_pattern(array $hosts) {
+    $quoted = [];
+    foreach ($hosts as $host) {
+        $host = strtolower(trim((string) $host));
+        if ($host !== '') {
+            $quoted[] = preg_quote($host, '#');
+        }
+    }
+    if (empty($quoted)) {
+        return '';
+    }
+    return '#^\s*(?:https?:)?//(?:' . implode('|', $quoted) . ')(?::\d+)?(?=[/?\#]|\s*$)#i';
+}
+
+/** یک آدرس مطلق داخلی → بدون دامنه (/music/)؛ آدرس‌های دیگر (خارجی، mailto، #، نسبی) همان‌طور برمی‌گردد */
+function bm_url_make_relative($url, array $hosts) {
+    $pattern = bm_hosts_pattern($hosts);
+    if ($pattern === '' || !preg_match($pattern, (string) $url)) {
+        return $url;
+    }
+    $rest = trim((string) preg_replace($pattern, '', (string) $url));
+    if ($rest === '' || $rest[0] !== '/') {
+        $rest = '/' . $rest; // «https://site» → «/»، «https://site?x» → «/?x»
+    }
+    return $rest;
+}
+
+/** لینک داخلی ساخته‌شده توسط خود ربات (get_term_link، لینک دسته و …) → بدون دامنه، اگر $bot_relative_links روشن باشد */
+function bm_relative_url($url) {
+    $url = (string) $url;
+    if ($url === '' || !bm_relative_links_enabled()) {
+        return $url;
+    }
+    return bm_url_make_relative($url, bm_internal_hosts());
+}
+
+/**
+ * عکس عمل بالا برای یک آدرس: بدون دامنه (/music/) → مطلق با $origin (مثل https://ahangban.ir)
+ * «//cdn…» (بدون پروتکل)، «/\…» و آدرس‌های دیگر دست نمی‌خورند.
+ */
+function bm_url_make_absolute($url, $origin) {
+    $origin = rtrim((string) $origin, '/');
+    if ($origin === '' || !preg_match('#^/(?![/\\\\])#', (string) $url)) {
+        return $url;
+    }
+    return $origin . $url;
+}
+
+/** تعویض میزبان یک آدرس مطلق: اگر روی یکی از $old_hosts بود → همان مسیر روی $new_origin (مثل https://dl.ahangban.com) */
+function bm_url_swap_host($url, array $old_hosts, $new_origin) {
+    $pattern    = bm_hosts_pattern($old_hosts);
+    $new_origin = rtrim((string) $new_origin, '/');
+    if ($pattern === '' || $new_origin === '' || !preg_match($pattern, (string) $url)) {
+        return $url;
+    }
+    $rest = trim((string) preg_replace($pattern, '', (string) $url));
+    if ($rest !== '' && $rest[0] !== '/') {
+        $rest = '/' . $rest;
+    }
+    return $new_origin . $rest;
+}
+
+/**
+ * اجرای یکی از سه عمل بالا روی همه‌ی لینک‌های یک HTML
+ *   $op = 'relative' (hosts → بدون دامنه) | 'absolute' (origin) | 'swap' (hosts + origin)
+ * خروجی: ['html' => متن جدید, 'changed' => تعداد لینک‌های عوض‌شده, 'pairs' => [[قبل, بعد], …] (حداکثر $max_pairs نمونه)]
+ */
+function bm_links_transform($html, $op, array $hosts = [], $origin = '', $max_pairs = 0) {
+    $changed = 0;
+    $pairs   = [];
+    $out     = bm_links_rewrite_attrs($html, function ($url) use ($op, $hosts, $origin, $max_pairs, &$changed, &$pairs) {
+        if ($op === 'relative') {
+            $new = bm_url_make_relative($url, $hosts);
+        } elseif ($op === 'absolute') {
+            $new = bm_url_make_absolute($url, $origin);
+        } elseif ($op === 'swap') {
+            $new = bm_url_swap_host($url, $hosts, $origin);
+        } else {
+            $new = $url;
+        }
+        if ($new !== $url) {
+            $changed++;
+            if (count($pairs) < $max_pairs) {
+                $pairs[] = [$url, $new];
+            }
+        }
+        return $new;
+    });
+    return ['html' => $out, 'changed' => $changed, 'pairs' => $pairs];
+}
+
+/** همه‌ی لینک‌های داخلی مطلق یک HTML → بدون دامنه. خروجی: ['html', 'changed', 'pairs'] */
+function bm_links_make_relative($html, array $hosts) {
+    return bm_links_transform($html, 'relative', $hosts);
+}
+
+/** لینک‌های بدون دامنه‌ی یک HTML → مطلق با $origin */
+function bm_links_make_absolute($html, $origin) {
+    return bm_links_transform($html, 'absolute', [], $origin);
+}
+
+/** تعویض میزبان همه‌ی لینک‌های مطلق یک HTML که روی $old_hosts هستند → $new_origin */
+function bm_links_swap_host($html, array $old_hosts, $new_origin) {
+    return bm_links_transform($html, 'swap', $old_hosts, $new_origin);
+}
+
 /**
  * اگر term وجود نداشت بساز و سپس روی پست ست کن
  */
@@ -1312,10 +1480,10 @@ function bm_build_post_content($args = []) {
     // چند هنرمند: [['name' => نام, 'link' => لینک آرشیو], ...] (خروجی bm_get_artist_terms)
     $artists     = (isset($args['artists']) && is_array($args['artists'])) ? $args['artists'] : [];
 
-    // لینک آهنگ جدید
+    // لینک آهنگ جدید (بدون دامنه: /music/ — بخش «لینک‌های داخلی بدون دامنه»)
     $music_html = '<strong>دانلود آهنگ جدید</strong>';
     if ($music_url !== '') {
-        $music_html = '<a href="' . esc_url($music_url) . '">' . $music_html . '</a>';
+        $music_html = '<a href="' . esc_url(bm_relative_url($music_url)) . '">' . $music_html . '</a>';
     }
 
     // لینک خواننده (هر هنرمند به صفحه‌ی خودش؛ با « و » کنار هم)
@@ -1330,7 +1498,7 @@ function bm_build_post_content($args = []) {
         }
         $one_html = '<strong>' . esc_html($name) . '</strong>';
         if (!empty($one['link'])) {
-            $one_html = '<a class="ty-singer-link" href="' . esc_url($one['link']) . '">' . $one_html . '</a>';
+            $one_html = '<a class="ty-singer-link" href="' . esc_url(bm_relative_url($one['link'])) . '">' . $one_html . '</a>';
         }
         $singer_parts[] = $one_html;
     }
@@ -1485,8 +1653,6 @@ $alt         = trim("آهنگ {$artist} {$song}");
 $mp3_name = bm_dl_file_name("{$artist_en} - {$song_en}");
 $imgname  = bm_safe_file_name("{$artist_en} {$song_en}");
 
-$post_cover = trailingslashit($urlsite) . "wp-content/uploads/{$dir_wp}/{$imgname}.jpg";
-
 /* -------------------------------------------------------
  |  4-1) مسیر و نام فایل‌ها روی هاست دانلود
  |  پوشه:  {نوع محتوا}/{حرف اول}/{نامک خواننده}   مثال: music/m/mohsen-yeganeh
@@ -1529,7 +1695,7 @@ $my_post_content = bm_build_post_content([
     'song'        => $song,
     'artist_en'   => $artist_en,
     'song_en'     => $song_en,
-    'music_url'   => trailingslashit($urlsite) . 'music/',
+    'music_url'   => trailingslashit($urlsite) . 'music/', // در متن پست بدون دامنه ذخیره می‌شود: /music/
     'artists'     => $artist_terms['artists'],
 ]);
 

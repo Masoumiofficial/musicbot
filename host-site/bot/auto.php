@@ -40,7 +40,7 @@ $arrContextOptions = [
     ],
     'http' => [
         'timeout' => 30,
-        'header'  => "User-Agent: Mozilla/5.0 (compatible; AhangBanBot/1.0; +https://ahangban.ir)\r\n",
+        'header'  => "User-Agent: Mozilla/5.0 (compatible; AhangBanBot/1.0; +" . home_url() . ")\r\n",
     ],
 ];
 

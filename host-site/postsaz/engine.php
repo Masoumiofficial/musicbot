@@ -508,7 +508,8 @@ function ps_build_content(array $type, array $args) {
     $label_fa = isset($type['content']['fa']) ? $type['content']['fa'] : 'دانلود ' . $type['label'] . ' جدید';
     $label_en = isset($type['content']['en']) ? $type['content']['en'] : 'Download New Music';
 
-    $first_html = '<a href="' . esc_url(ps_type_archive_link($type)) . '"><strong>' . esc_html($label_fa) . '</strong></a>';
+    // لینک‌های داخلی بدون دامنه (/music/، /artist/…) — bm_relative_url در bot/script.php؛ config: $bot_relative_links
+    $first_html = '<a href="' . esc_url(bm_relative_url(ps_type_archive_link($type))) . '"><strong>' . esc_html($label_fa) . '</strong></a>';
 
     if (empty($artists)) {
         $artists = [['name' => $artist, 'link' => '']];
@@ -521,7 +522,7 @@ function ps_build_content(array $type, array $args) {
         }
         $one_html = '<strong>' . esc_html($name) . '</strong>';
         if (!empty($one['link'])) {
-            $one_html = '<a class="ty-singer-link" href="' . esc_url($one['link']) . '">' . $one_html . '</a>';
+            $one_html = '<a class="ty-singer-link" href="' . esc_url(bm_relative_url($one['link'])) . '">' . $one_html . '</a>';
         }
         $singer_parts[] = $one_html;
     }

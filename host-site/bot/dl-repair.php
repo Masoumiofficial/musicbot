@@ -575,7 +575,7 @@ if (isset($_GET['probe'])) {
         } elseif ($blocked('form') && $blocked('multipart') && ($ok('get_ua') || $ok('get_noua'))) {
             echo '<li class="bad">GET می‌رسد ولی هر POST به PHP رد می‌شود. این کار WAF/ModSecurity هاست دانلود است؛ از پشتیبانی هاست دانلود بخواهید درخواست‌های POST از IP بالا به music.php را آزاد کنند (یا بگویند دقیقاً چه قالبی مجاز است).</li>';
         } elseif ($blocked('get_ua') && $blocked('get_noua')) {
-            echo '<li class="bad">هر درخواستی از سرور سایت به music.php رد می‌شود (حتی GET ساده) ولی فایل‌های استاتیک پاسخ می‌دهند؛ یعنی IP سرور سایت برای اجرای PHP روی هاست دانلود مسدود شده (فایروال، ModSecurity/Imunify، یا قانون deny در nginx). راه حل فقط دست پشتیبانی هاست دانلود است: «درخواست‌های IP ' . dlr_h($client_ip !== '' ? $client_ip : 'سرور سایت') . ' به dl.ahangban.ir/music.php با 403 رد می‌شود، لطفاً آزاد شود». تا آن موقع می‌توانید music.php?ping=1 را در مرورگر خودتان باز کنید تا ببینید از IP شما کار می‌کند.</li>';
+            echo '<li class="bad">هر درخواستی از سرور سایت به music.php رد می‌شود (حتی GET ساده) ولی فایل‌های استاتیک پاسخ می‌دهند؛ یعنی IP سرور سایت برای اجرای PHP روی هاست دانلود مسدود شده (فایروال، ModSecurity/Imunify، یا قانون deny در nginx). راه حل فقط دست پشتیبانی هاست دانلود است: «درخواست‌های IP ' . dlr_h($client_ip !== '' ? $client_ip : 'سرور سایت') . ' به ' . dlr_h(preg_replace('#^https?://#i', '', (string) $functions_dl_music)) . ' با 403 رد می‌شود، لطفاً آزاد شود». تا آن موقع می‌توانید music.php?ping=1 را در مرورگر خودتان باز کنید تا ببینید از IP شما کار می‌کند.</li>';
         } else {
             echo '<li class="warn">الگوی مشخصی درنیامد؛ جدول بالا را برای پشتیبانی هاست دانلود بفرستید.</li>';
         }
