@@ -162,8 +162,9 @@ $postsaz = [
      |    متای «album» = تعداد قطعه‌ها و برای هر قطعه (شماره از 0):
      |    album_0_song_names ، album_0_albumlink320 ، album_0_albumlink128 ، album_1_... و همین‌طور تا آخر
      |    zip320 / zip128 = متای فایل‌های ZIP هر کیفیت
-     |  روی هاست دانلود:  {dir}/{حرف اول}/{نامک خواننده}/Artist - Album [320]/01. Artist - Track [320].mp3
-     |                    {dir}/{حرف اول}/{نامک خواننده}/Artist - Album [320].zip
+     |  روی هاست دانلود:  {dir}/{حرف اول}/{نامک خواننده}/Artist - Album/01. Artist - Track.mp3          (کیفیت 320: بدون پسوند)
+     |                    {dir}/{حرف اول}/{نامک خواننده}/Artist - Album [128]/01. Artist - Track [128].mp3
+     |                    {dir}/{حرف اول}/{نامک خواننده}/Artist - Album.zip  و  Artist - Album [128].zip
      * ------------------------------------------------------ */
     'album' => [
         'max_tracks' => 30,

@@ -4,12 +4,13 @@
  *
  * ساختار پوشه‌ها (از طرف اسکریپت سایت در dir_file ارسال می‌شود):
  *   {نوع محتوا}/{حرف اول}/{نامک خواننده}      مثال: music/m/mohsen-yeganeh
- * نام فایل‌ها:
- *   Artist - Song [320].mp3  و  Artist - Song [128].mp3
+ * نام فایل‌ها (از طرف فرستنده در file_320 / file_128؛ پیش‌فرض همین قاعده):
+ *   Artist - Song.mp3  (کیفیت 320، بدون پسوند)  و  Artist - Song [128].mp3
  *
- * ورودی (POST): music320, music128, image, artist_en, song_en, mp3_name, file_320, file_128, dir_file
+ * ورودی (POST): music320, music128, image, artist_en, song_en, mp3_name, file_320, file_128, dir_file,
+ *               lyrics (اختیاری: متن ساده‌ی ترانه → داخل تگ ID3 هر دو فایل، فریم USLT)
  * خروجی: JSON
- *   {"ok": true|false, "dir": "...", "files": [{"name", "ok", "size", "http", "error", "tags"}], "cover": {..., "watermark": {"ok", "note"}}, "error": "..."}
+ *   {"ok": true|false, "dir": "...", "files": [{"name", "ok", "size", "http", "error", "tags"}], "cover": {..., "watermark": {"ok", "note"}}, "lyrics": true|false, "error": "..."}
  *   کد HTTP: 200 = همه‌ی فایل‌های خواسته‌شده منتقل شدند | 502 = دانلود از مبدأ ناموفق | 500 = خطای نوشتن روی هاست | 400 = ورودی ناقص
  *   (نسخه‌ی قبلی حتی وقتی فایل دانلود نمی‌شد 200 برمی‌گرداند و ربات «انجام شد» گزارش می‌کرد.)
  *
@@ -133,6 +134,7 @@ $artistName  = pz_post('artist_en');
 $songTitle   = pz_post('song_en');
 $mp3FileName = pz_sanitize_name(pz_post('mp3_name'));
 $directory   = pz_sanitize_dir(pz_post('dir_file'));
+$lyrics      = pz_post('lyrics'); // متن ساده‌ی ترانه (bm_lyrics_plain در سایت)؛ خالی = بدون تگ متن
 
 if ($mp3FileName === '' || $directory === '') {
     pz_fail('mp3_name and dir_file are required.', 400);
@@ -144,10 +146,13 @@ if ($musicUrl320 === '' && $musicUrl128 === '') {
 $fileName320 = pz_sanitize_name(pz_post('file_320'));
 $fileName128 = pz_sanitize_name(pz_post('file_128'));
 if ($fileName320 === '') {
-    $fileName320 = "{$mp3FileName} [320].mp3";
+    $fileName320 = $mp3FileName . pz_quality_suffix('320') . '.mp3'; // «Artist - Song.mp3»
 }
 if ($fileName128 === '') {
-    $fileName128 = "{$mp3FileName} [128].mp3";
+    $fileName128 = $mp3FileName . pz_quality_suffix('128') . '.mp3'; // «Artist - Song [128].mp3»
+}
+if ($fileName128 === $fileName320) {
+    $fileName128 = $mp3FileName . ' [128].mp3'; // دو کیفیت هرگز روی یک فایل نوشته نشوند
 }
 
 $baseDir = pz_abs_dir($directory);
@@ -194,7 +199,7 @@ foreach ([[$musicUrl320, $fileName320, '320'], [$musicUrl128, $fileName128, '128
         'tags'    => '',
     ];
     if ($result['ok']) {
-        $tag = pz_write_mp3_tags($path, ['title' => $songTitle, 'artist' => $artistName, 'cover' => ($coverResult['ok'] ? $coverPath : '')]);
+        $tag = pz_write_mp3_tags($path, ['title' => $songTitle, 'artist' => $artistName, 'cover' => ($coverResult['ok'] ? $coverPath : ''), 'lyrics' => $lyrics]);
         $entry['tags'] = pz_tag_note($tag);
     } else {
         $all_ok = false;
@@ -217,9 +222,10 @@ foreach ($files as $f) {
 }
 
 pz_json([
-    'ok'    => $all_ok,
-    'dir'   => $directory,
-    'files' => $files,
-    'cover' => $coverResult,
-    'error' => implode(' | ', $errors),
+    'ok'     => $all_ok,
+    'dir'    => $directory,
+    'files'  => $files,
+    'cover'  => $coverResult,
+    'lyrics' => $lyrics !== '',
+    'error'  => implode(' | ', $errors),
 ], $all_ok ? 200 : ($write_fail ? 500 : 502));

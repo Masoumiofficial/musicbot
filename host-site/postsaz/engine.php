@@ -1203,8 +1203,8 @@ function ps_run_single() {
     bm_set_term_if_not_empty($post_id, $genre, 'genre', false);
 
     $host    = ps_dl_host();
-    $file320 = $names['file_base'] . ' [320].mp3';
-    $file128 = $names['file_base'] . ' [128].mp3';
+    $file320 = bm_music_file_name($names['file_base'], '320'); // «Artist - Song.mp3» (320 بدون پسوند)
+    $file128 = bm_music_file_name($names['file_base'], '128'); // «Artist - Song [128].mp3»
     $url320  = $m320['url'] !== '' ? $host . $names['dl_dir'] . '/' . $file320 : '';
     $url128  = $m128['url'] !== '' ? $host . $names['dl_dir'] . '/' . $file128 : '';
     $online  = $url128 !== '' ? $url128 : $url320;
@@ -1239,6 +1239,7 @@ function ps_run_single() {
         'file_320'  => $file320,
         'file_128'  => $file128,
         'dir_file'  => $names['dl_dir'],
+        'lyrics'    => bm_lyrics_plain($lyrics), // متن ترانه داخل تگ ID3 فایل‌ها (hostdl/music.php)
     ]);
     ps_store_dl_response($post_id, $response);
 
@@ -1571,10 +1572,10 @@ function ps_run_album() {
     // نام پوشه‌ها و فایل‌ها روی هاست دانلود
     $host      = ps_dl_host();
     $base_url  = $host . $names['dl_dir'] . '/';
-    $folder320 = $names['file_base'] . ' [320]';
-    $folder128 = $names['file_base'] . ' [128]';
-    $zip320    = $names['file_base'] . ' [320].zip';
-    $zip128    = $names['file_base'] . ' [128].zip';
+    $folder320 = $names['file_base'] . bm_dl_quality_suffix('320'); // «Artist - Album» (320 بدون پسوند)
+    $folder128 = $names['file_base'] . bm_dl_quality_suffix('128'); // «Artist - Album [128]»
+    $zip320    = $folder320 . '.zip';
+    $zip128    = $folder128 . '.zip';
     $has320    = false;
     $has128    = false;
 
@@ -1589,8 +1590,8 @@ function ps_run_album() {
 
     foreach ($tracks as $track) {
         $track_base = sprintf('%02d. ', $track['no']) . bm_dl_file_name("{$artist_en} - {$track['name']}");
-        $file320    = $track_base . ' [320].mp3';
-        $file128    = $track_base . ' [128].mp3';
+        $file320    = bm_music_file_name($track_base, '320'); // «01. Artist - Track.mp3»
+        $file128    = bm_music_file_name($track_base, '128'); // «01. Artist - Track [128].mp3»
         $url320     = $track['url320'] !== '' ? $base_url . $folder320 . '/' . $file320 : '';
         $url128     = $track['url128'] !== '' ? $base_url . $folder128 . '/' . $file128 : '';
         $has320     = $has320 || $url320 !== '';
@@ -1729,7 +1730,7 @@ function ps_run_leech() {
 
     $file_base = bm_dl_file_name("{$artist_en} - {$song_en}");
     $dl_dir    = bm_download_dir($folder, $artist_en);
-    $mp3_name  = $file_base . " [{$mp3_quality}].mp3";
+    $mp3_name  = bm_music_file_name($file_base, $mp3_quality); // 320 بدون پسوند، 128 با « [128]»
     $mp4_name  = $file_base . " [{$mp4_quality}].mp4";
     $host      = ps_dl_host();
 

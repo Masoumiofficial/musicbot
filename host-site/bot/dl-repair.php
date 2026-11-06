@@ -220,8 +220,10 @@ function dlr_media_for_post($post_id, $manual_source, $api_url) {
 
 /**
  * مسیر و نام فایل‌ها از روی لینک‌های ذخیره‌شده در متای music320 / music128 (همان پوشه‌ای که فایل‌های پست در آن است)
- * نام هر کیفیت همیشه «نام پایه + [320]/[128]» ساخته می‌شود، نه از روی لینک همان کیفیت: وقتی 128 نبوده، music128 به فایل 320
- * اشاره می‌کند و اگر نام از روی آن گرفته می‌شد، فایل 128 روی فایل 320 نوشته می‌شد.
+ * نام هر کیفیت از روی لینک همان کیفیت گرفته می‌شود اگر واقعاً مال همان کیفیت باشد (فایل‌های قدیمی «[320]» با همان نام
+ * می‌مانند)، وگرنه «نام پایه + پسوند کیفیت» (قاعده‌ی فعلی: «نام پایه.mp3» و «نام پایه [128].mp3» — bm_music_file_name).
+ * دقت: وقتی 128 نبوده، music128 به فایل 320 اشاره می‌کند؛ نام 128 فقط وقتی از لینک گرفته می‌شود که پسوند [128]/(128) داشته باشد
+ * تا فایل 128 روی فایل 320 نوشته نشود.
  */
 function dlr_target_from_post($post_id, $dl_host) {
     $link320 = (string) get_post_meta($post_id, 'music320', true);
@@ -234,16 +236,29 @@ function dlr_target_from_post($post_id, $dl_host) {
     }
     $relative = rawurldecode(substr($base, strlen($host) + 1));
     $dir      = trim((string) dirname($relative), '/.');
-    // نام پایه: پسوند کیفیت به هر دو شکل جدید «[320]» و قدیمی «(128)» و خود .mp3 برداشته می‌شود
-    $mp3_name = preg_replace('/\s*(?:\[(?:320|128)\]|\((?:320|128)\))?\.mp3$/i', '', rawurldecode(basename($base)));
+    // نام پایه: پسوند کیفیت به هر دو شکل «[320]/[128]» و قدیمی «(128)» و خود .mp3 برداشته می‌شود
+    $suffix   = '/\s*(?:\[(?:320|128)\]|\((?:320|128)\))?\.mp3$/i';
+    $mp3_name = preg_replace($suffix, '', rawurldecode(basename($base)));
 
     if ($dir === '' || $mp3_name === '') {
         return null;
     }
+
+    $name320 = $link320 !== '' ? rawurldecode(basename($link320)) : '';
+    $name128 = $link128 !== '' ? rawurldecode(basename($link128)) : '';
+    $file320 = ($name320 !== '' && preg_match('/\.mp3$/i', $name320) && preg_replace($suffix, '', $name320) === $mp3_name)
+        ? $name320
+        : bm_music_file_name($mp3_name, '320');
+    $file128 = ($name128 !== '' && preg_match('/\s*(?:\[128\]|\(128\))\.mp3$/i', $name128) && preg_replace($suffix, '', $name128) === $mp3_name)
+        ? $name128
+        : bm_music_file_name($mp3_name, '128');
+    if ($file128 === $file320) {
+        $file128 = bm_music_file_name($mp3_name, '128');
+    }
     return [
         'dir'      => $dir,
-        'file_320' => "{$mp3_name} [320].mp3",
-        'file_128' => "{$mp3_name} [128].mp3",
+        'file_320' => $file320,
+        'file_128' => $file128,
         'mp3_name' => $mp3_name,
         'link320'  => $link320,
         'link128'  => $link128,
@@ -295,6 +310,7 @@ function dlr_repair_post($post_id, $manual_source) {
         'file_320'  => $target['file_320'],
         'file_128'  => $target['file_128'],
         'dir_file'  => $target['dir'],
+        'lyrics'    => bm_lyrics_plain((string) get_post_meta($post_id, 'music_text', true)), // متن ترانه داخل تگ فایل‌ها
     ], 600, $dl_userpwd);
     $info = bm_dl_response_info($response);
     update_post_meta($post_id, '_bm_download_response', maybe_serialize($response));

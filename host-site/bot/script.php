@@ -88,6 +88,49 @@ function bm_dl_file_name($text) {
 }
 
 /**
+ * پسوند کیفیت در نام فایل/پوشه‌ی هاست دانلود: کیفیت اصلی (320) بدون پسوند، 128 با « [128]»
+ *   Artist - Song.mp3   و   Artist - Song [128].mp3      (آلبوم: «Artist - Album/» و «Artist - Album [128]/» و zip‌ها)
+ * فایل‌های قدیمی با «[320]» سر جایشان می‌مانند (لینک پست‌های قبلی عوض نمی‌شود؛ bot/dl-repair.php نام موجود را نگه می‌دارد).
+ * پیش‌فرض گیرنده‌های هاست دانلود (hostdl/music.php و hostdl/album.php) همین قاعده است.
+ */
+function bm_dl_quality_suffix($quality) {
+    return (string) $quality === '128' ? ' [128]' : '';
+}
+
+/** نام فایل MP3 یک کیفیت از روی نام پایه («Artist - Song»): bm_music_file_name('A - B', '320') = «A - B.mp3» */
+function bm_music_file_name($mp3_name, $quality) {
+    return $mp3_name . bm_dl_quality_suffix($quality) . '.mp3';
+}
+
+/**
+ * متن ترانه به‌صورت متن ساده برای تگ ID3 داخل فایل MP3 (USLT؛ پلیرها آن را به‌عنوان Lyrics نشان می‌دهند):
+ * تگ‌های HTML برداشته می‌شود (br / p / div → خط جدید)، موجودیت‌ها (&amp; …) باز، فاصله‌های اضافه‌ی هر خط گرفته
+ * و بیشتر از یک خط خالی پشت سر هم نمی‌ماند. خالی → '' (تگ نوشته نمی‌شود)
+ */
+function bm_lyrics_plain($text) {
+    $text = is_string($text) ? $text : '';
+    if (trim($text) === '') {
+        return '';
+    }
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $text = preg_replace('#<br\s*/?>#iu', "\n", $text);
+    $text = preg_replace('#</(p|div|blockquote)>#iu', "\n\n", $text); // پاراگراف → یک خط خالی (بند ترانه)
+    $text = preg_replace('#</(li|h[1-6]|tr)>#iu', "\n", $text);
+    $text = wp_strip_all_tags($text, false);
+    $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $text = str_replace("\xC2\xA0", ' ', $text);
+    $lines = [];
+    foreach (explode("\n", $text) as $line) {
+        $lines[] = trim(preg_replace('/[ \t]+/u', ' ', $line));
+    }
+    $text = trim(preg_replace("/\n{3,}/", "\n\n", implode("\n", $lines)));
+    if (function_exists('mb_substr') && mb_strlen($text, 'UTF-8') > 20000) {
+        $text = mb_substr($text, 0, 20000, 'UTF-8');
+    }
+    return $text;
+}
+
+/**
  * نامک انگلیسی خواننده برای پوشه‌ی هاست دانلود
  * مثال: «Mohsen Yeganeh» => «mohsen-yeganeh»
  * اگر نام انگلیسی در دسترس نبود (مثلاً فارسی بود)، از نام امن‌شده‌ی همان متن استفاده می‌شود
@@ -1657,7 +1700,7 @@ if ($song_en === '') {
  |  الف) همین لینک مبدأ قبلاً ثبت شده (متای _bm_source_url) → همیشه رد می‌شود
  |  ب) عنوان یکسان ولی لینک مبدأ دیگر (قطعه‌ی دیگری با نام عمومی مثل «ساز و آواز» یا «ربنا»):
  |     اگر $bm_same_title = 'number' باشد (ارسال دستی/آرشیو با گزینه‌ی «ثبت با شماره») با شماره‌ی تمایز
- |     ثبت می‌شود: «ساز و آواز (2)» و نام فایل «… - Saz o Avaz 2 [320].mp3»؛ وگرنه (پیش‌فرض و ارسال
+ |     ثبت می‌شود: «ساز و آواز (2)» و نام فایل «… - Saz o Avaz 2.mp3»؛ وگرنه (پیش‌فرض و ارسال
  |     خودکار) رد می‌شود. پست‌های قدیمی که لینک مبدأ ندارند فقط با عنوان مقایسه می‌شوند.
  * ------------------------------------------------------ */
 $bm_same_title_note = '';
@@ -1714,11 +1757,11 @@ $imgname  = bm_safe_file_name("{$artist_en} {$song_en}");
 /* -------------------------------------------------------
  |  4-1) مسیر و نام فایل‌ها روی هاست دانلود
  |  پوشه:  {نوع محتوا}/{حرف اول}/{نامک خواننده}   مثال: music/m/mohsen-yeganeh
- |  فایل:  Artist - Song [320].mp3  و  Artist - Song [128].mp3
+ |  فایل:  Artist - Song.mp3  (کیفیت 320، بدون پسوند)  و  Artist - Song [128].mp3   — bm_music_file_name
  * ------------------------------------------------------ */
 $dl_dir       = bm_download_dir($content_type, $artist_en);
-$mp3_file_320 = "{$mp3_name} [320].mp3";
-$mp3_file_128 = "{$mp3_name} [128].mp3";
+$mp3_file_320 = bm_music_file_name($mp3_name, '320');
+$mp3_file_128 = bm_music_file_name($mp3_name, '128');
 
 /* -------------------------------------------------------
  |  5) جلوگیری از پست تکراری → به بخش 3-1 منتقل شد (قبل از ساخت نام‌ها)
@@ -1986,6 +2029,7 @@ if (!empty($functions_dl_music)) {
         'file_320'  => $mp3_file_320,
         'file_128'  => $mp3_file_128,
         'dir_file'  => $dl_dir, // مثال: music/m/mohsen-yeganeh
+        'lyrics'    => bm_lyrics_plain($matnmusic), // متن ترانه داخل تگ ID3 فایل‌ها (hostdl/music.php)
     ], 300, $dl_userpwd);
     $download_info = bm_dl_response_info($download_response);
 
