@@ -67,6 +67,29 @@ function ps_module_type($module) {
     return !empty($types) ? reset($types) : null;
 }
 
+/** کلید تب پنل برای یک نوع: تب جداگانه (tab در config) یا تب عمومی «تک‌آهنگ»/ماژول */
+function ps_type_tab(array $type) {
+    if ($type['module'] === 'single') {
+        $tab = !empty($type['tab']) ? sanitize_key((string) $type['tab']) : '';
+        return $tab !== '' ? $tab : 'single';
+    }
+    return $type['module'];
+}
+
+/**
+ * نوع‌های تک‌آهنگ گروه‌بندی‌شده بر اساس تب: ['single' => [...], 'trend' => [...]] — تب «تک‌آهنگ» همیشه اول
+ */
+function ps_single_tabs() {
+    $groups = ['single' => []];
+    foreach (ps_types('single') as $key => $type) {
+        $groups[ps_type_tab($type)][$key] = $type;
+    }
+    if (empty($groups['single'])) {
+        unset($groups['single']);
+    }
+    return $groups;
+}
+
 function ps_site_url() {
     return trailingslashit(!empty($GLOBALS['urlsite']) ? (string) $GLOBALS['urlsite'] : home_url());
 }
@@ -454,18 +477,28 @@ function ps_check_english($artist_en, $song_en) {
     return '';
 }
 
-function ps_names(array $type, $artist, $song, $artist_en, $song_en) {
-    $vars = [
+/** جایگزین‌های الگوهای config (title / keyword / description) */
+function ps_type_vars(array $type, $artist, $song, $artist_en, $song_en) {
+    return [
         '{artist}'    => $artist,
         '{song}'      => $song,
         '{artist_en}' => $artist_en,
         '{song_en}'   => $song_en,
         '{label}'     => $type['label'],
     ];
+}
+
+/** یک الگوی config را با جایگزین‌ها پر می‌کند و فاصله‌های اضافه را می‌گیرد */
+function ps_fill_template($template, array $vars) {
+    return trim((string) preg_replace('/\s+/u', ' ', strtr((string) $template, $vars)));
+}
+
+function ps_names(array $type, $artist, $song, $artist_en, $song_en) {
+    $vars     = ps_type_vars($type, $artist, $song, $artist_en, $song_en);
     $template = !empty($type['title']) ? (string) $type['title'] : 'دانلود {label} {artist} {song}';
 
     return [
-        'title'     => trim(preg_replace('/\s+/u', ' ', strtr($template, $vars))),
+        'title'     => ps_fill_template($template, $vars),
         'slug'      => trim("{$artist_en} {$song_en}"),
         'alt'       => trim("{$type['label']} {$artist} {$song}"),
         'file_base' => bm_dl_file_name("{$artist_en} - {$song_en}"),
@@ -474,12 +507,45 @@ function ps_names(array $type, $artist, $song, $artist_en, $song_en) {
     ];
 }
 
+/**
+ * کلمه‌های کلیدی Rank Math: کلمه‌ی اصلی (الگوی keyword نوع، پیش‌فرض «دانلود {label} {artist} {song}»)،
+ * کلمه‌های اضافه‌ی نوع (keywords در config، مثلاً «آهنگ های ترند»)، «خواننده آهنگ» و نام انگلیسی
+ */
 function ps_keywords(array $type, $artist, $song, $artist_en, $song_en) {
-    return array_values(array_unique(array_filter([
-        trim("دانلود {$type['label']} {$artist} {$song}"),
-        trim("{$artist} {$song}"),
-        ($artist_en !== $artist || $song_en !== $song) ? trim("{$artist_en} {$song_en}") : '',
-    ])));
+    $vars     = ps_type_vars($type, $artist, $song, $artist_en, $song_en);
+    $primary  = ps_fill_template(!empty($type['keyword']) ? $type['keyword'] : 'دانلود {label} {artist} {song}', $vars);
+    $keywords = [$primary];
+    foreach ((array) (isset($type['keywords']) ? $type['keywords'] : []) as $extra) {
+        $keywords[] = ps_fill_template($extra, $vars);
+    }
+    $keywords[] = trim("{$artist} {$song}");
+    $keywords[] = ($artist_en !== $artist || $song_en !== $song) ? trim("{$artist_en} {$song_en}") : '';
+    return array_values(array_unique(array_filter($keywords)));
+}
+
+/** توضیحات متا: الگوی description نوع (اگر در config باشد) وگرنه جمله‌ی پیش‌فرض ماژول */
+function ps_description(array $type, array $vars, $default) {
+    if (!empty($type['description'])) {
+        return ps_fill_template($type['description'], $vars);
+    }
+    return $default;
+}
+
+/**
+ * پیام پست تکراری (عنوان یکسان): لینک پست و ویرایش؛ اگر پست موجود در دسته‌ی اصلی این نوع نیست (مثلاً آهنگ عادی
+ * که حالا می‌خواهید «آهنگ ترند» شود) پیشنهاد می‌دهد همان پست را ویرایش کنید به‌جای ساختن پست دوباره
+ */
+function ps_duplicate_message($duplicate, array $type) {
+    $message = 'پستی با همین عنوان وجود دارد (ID ' . (int) $duplicate . '): ' . get_permalink($duplicate)
+        . ' — ویرایش: ' . admin_url('post.php?post=' . (int) $duplicate . '&action=edit');
+    $categories = isset($type['categories']) ? array_map('intval', (array) $type['categories']) : [];
+    if (!empty($categories) && !has_category($categories[0], $duplicate)) {
+        $term = get_term($categories[0], 'category');
+        if ($term && !is_wp_error($term)) {
+            $message .= ' — اگر همان اثر است، به‌جای پست دوباره، همان پست را ویرایش کنید و دسته‌ی «' . $term->name . '» را تیک بزنید.';
+        }
+    }
+    return $message . ' برای ثبت دوباره گزینه‌ی «اجازه‌ی عنوان تکراری» را بزنید.';
 }
 
 /** لینک آرشیو نوع (دسته‌ی اصلی) برای لینک اول متن پست */
@@ -1087,7 +1153,7 @@ function ps_run_single() {
     if (!ps_in('allow_duplicate')) {
         $duplicate = ps_duplicate_post_id($names['title']);
         if ($duplicate) {
-            return ps_fail($report, 'پستی با همین عنوان وجود دارد (ID ' . $duplicate . '): ' . get_permalink($duplicate) . ' — برای ثبت دوباره گزینه‌ی «اجازه‌ی عنوان تکراری» را بزنید.');
+            return ps_fail($report, ps_duplicate_message($duplicate, $type));
         }
     }
     if (bm_auth_userpwd() === '') {
@@ -1127,7 +1193,7 @@ function ps_run_single() {
     $author = get_userdata($author_id);
     ps_row($report, 'نویسنده', $author ? $author->display_name . ' (' . $author->user_login . ' — ID ' . $author_id . ')' : 'ID ' . $author_id);
 
-    $description = 'دانلود ' . $type['label'] . " جدید {$artist} به نام {$song} با کیفیت 320 و 128، پخش آنلاین" . ($lyrics !== '' ? ' و متن ترانه' : '');
+    $description = ps_description($type, ps_type_vars($type, $artist, $song, $artist_en, $song_en), 'دانلود ' . $type['label'] . " جدید {$artist} به نام {$song} با کیفیت 320 و 128، پخش آنلاین") . ($lyrics !== '' ? ' و متن ترانه' : '');
     ps_apply_seo($post_id, $names['title'], $description, ps_keywords($type, $artist, $song, $artist_en, $song_en));
 
     ps_row($report, 'دسته‌ها', ps_apply_categories($post_id, ps_selected_categories($type)));
@@ -1262,7 +1328,7 @@ function ps_run_video() {
     if (!ps_in('allow_duplicate')) {
         $duplicate = ps_duplicate_post_id($names['title']);
         if ($duplicate) {
-            return ps_fail($report, 'پستی با همین عنوان وجود دارد (ID ' . $duplicate . '): ' . get_permalink($duplicate) . ' — برای ثبت دوباره گزینه‌ی «اجازه‌ی عنوان تکراری» را بزنید.');
+            return ps_fail($report, ps_duplicate_message($duplicate, $type));
         }
     }
     if (bm_auth_userpwd() === '') {
@@ -1302,7 +1368,7 @@ function ps_run_video() {
     $quality_labels = array_map(function ($q) {
         return $q . 'p';
     }, array_keys($videos));
-    $description = "دانلود موزیک ویدیو جدید {$artist} به نام {$song} با کیفیت " . implode('، ', $quality_labels) . ' و پخش آنلاین';
+    $description = ps_description($type, ps_type_vars($type, $artist, $song, $artist_en, $song_en), "دانلود موزیک ویدیو جدید {$artist} به نام {$song} با کیفیت " . implode('، ', $quality_labels) . ' و پخش آنلاین');
     ps_apply_seo($post_id, $names['title'], $description, ps_keywords($type, $artist, $song, $artist_en, $song_en));
 
     ps_row($report, 'دسته‌ها', ps_apply_categories($post_id, ps_selected_categories($type)));
@@ -1464,7 +1530,7 @@ function ps_run_album() {
     if (!ps_in('allow_duplicate')) {
         $duplicate = ps_duplicate_post_id($names['title']);
         if ($duplicate) {
-            return ps_fail($report, 'پستی با همین عنوان وجود دارد (ID ' . $duplicate . '): ' . get_permalink($duplicate) . ' — برای ثبت دوباره گزینه‌ی «اجازه‌ی عنوان تکراری» را بزنید.');
+            return ps_fail($report, ps_duplicate_message($duplicate, $type));
         }
     }
     if (bm_auth_userpwd() === '') {
@@ -1495,7 +1561,7 @@ function ps_run_album() {
     $author = get_userdata($author_id);
     ps_row($report, 'نویسنده', $author ? $author->display_name . ' (' . $author->user_login . ' — ID ' . $author_id . ')' : 'ID ' . $author_id);
 
-    $description = "دانلود آلبوم جدید {$song} از {$artist} با " . count($tracks) . ' قطعه، کیفیت 320 و 128، پخش آنلاین';
+    $description = ps_description($type, ps_type_vars($type, $artist, $song, $artist_en, $song_en), "دانلود آلبوم جدید {$song} از {$artist} با " . count($tracks) . ' قطعه، کیفیت 320 و 128، پخش آنلاین');
     ps_apply_seo($post_id, $names['title'], $description, ps_keywords($type, $artist, $song, $artist_en, $song_en));
 
     ps_row($report, 'دسته‌ها', ps_apply_categories($post_id, ps_selected_categories($type)));
