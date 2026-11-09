@@ -1342,6 +1342,58 @@ function bm_post_id_by_title($title) {
     ));
 }
 
+/**
+ * الگوی عنوان پست ($bot_title_template در config.php؛ جایگزین‌ها {song} و {artist})
+ * پیش‌فرض «دانلود آهنگ {song} از {artist}» — همان ترتیبی که جستجو می‌شود و قالب در تیترهای پست می‌نویسد
+ */
+function bm_title_template() {
+    global $bot_title_template;
+    $template = isset($bot_title_template) ? trim((string) $bot_title_template) : '';
+    return ($template !== '' && strpos($template, '{song}') !== false) ? $template : 'دانلود آهنگ {song} از {artist}';
+}
+
+/** پر کردن الگوی عنوان با نام خواننده و آهنگ؛ فاصله‌های تکراری یکی می‌شود */
+function bm_fill_title($template, $artist, $song) {
+    $title = strtr((string) $template, ['{artist}' => (string) $artist, '{song}' => (string) $song]);
+    return trim((string) preg_replace('/\s+/u', ' ', $title));
+}
+
+/** عنوان پستی که ربات برای این آهنگ می‌سازد (عنوان پست، عنوان متا و کلمه‌ی کانونی اصلی) */
+function bm_post_title($artist, $song) {
+    return bm_fill_title(bm_title_template(), $artist, $song);
+}
+
+/**
+ * همه‌ی عنوان‌های ممکن این آهنگ: الگوی فعلی + الگوهای قدیمی ($bot_title_legacy در config.php)
+ * پست‌های قدیمی سایت با «دانلود آهنگ {artist} {song}» ساخته شده‌اند؛ تشخیص پست تکراری باید آن‌ها را هم ببیند
+ */
+function bm_title_variants($artist, $song) {
+    global $bot_title_legacy;
+    $templates = array_merge(
+        [bm_title_template()],
+        isset($bot_title_legacy) ? array_values((array) $bot_title_legacy) : ['دانلود آهنگ {artist} {song}']
+    );
+    $titles = [];
+    foreach ($templates as $template) {
+        $title = bm_fill_title($template, $artist, $song);
+        if ($title !== '' && !in_array($title, $titles, true)) {
+            $titles[] = $title;
+        }
+    }
+    return $titles;
+}
+
+/** شناسه‌ی پستی که عنوانش با الگوی فعلی یا یکی از الگوهای قدیمی این آهنگ یکی است، یا 0 */
+function bm_post_id_by_song_title($artist, $song) {
+    foreach (bm_title_variants($artist, $song) as $title) {
+        $post_id = bm_post_id_by_title($title);
+        if ($post_id) {
+            return $post_id;
+        }
+    }
+    return 0;
+}
+
 /** شناسه‌ی پستی که از همین لینک مبدأ ساخته شده (متای _bm_source_url) یا 0 */
 function bm_post_id_by_source_url($url) {
     global $wpdb;
@@ -1727,15 +1779,17 @@ if ($source_exists) {
         . bm_result_marker('exists', ['reason' => 'source', 'post_id' => $source_exists, 'link' => get_permalink($source_exists), 'message' => 'همین لینک قبلاً ثبت شده (ID ' . $source_exists . ')']));
 }
 
-$title_exists = bm_post_id_by_title(trim("دانلود آهنگ {$artist} {$song}"));
+// عنوان تکراری: با الگوی فعلی («دانلود آهنگ {song} از {artist}») و الگوهای قدیمی («دانلود آهنگ {artist} {song}»)
+// مقایسه می‌شود تا آهنگی که قبلاً با عنوان قدیمی ثبت شده دوباره ساخته نشود
+$title_exists = bm_post_id_by_song_title($artist, $song);
 if ($title_exists) {
     if ($same_title_mode !== 'number') {
-        exit('پست با این عنوان قبلاً ثبت شده است. ID: ' . intval($title_exists)
+        exit('پست با این عنوان قبلاً ثبت شده است. ID: ' . intval($title_exists) . ' («' . get_the_title($title_exists) . '»)'
             . ' — اگر قطعه‌ی دیگری با همین نام است، با گزینه‌ی «ثبت با شماره» دوباره بفرستید.'
-            . bm_result_marker('exists', ['reason' => 'title', 'post_id' => $title_exists, 'link' => get_permalink($title_exists), 'message' => 'پستی با همین عنوان هست (ID ' . $title_exists . ')']));
+            . bm_result_marker('exists', ['reason' => 'title', 'post_id' => $title_exists, 'link' => get_permalink($title_exists), 'message' => 'پستی با همین عنوان هست (ID ' . $title_exists . ': ' . get_the_title($title_exists) . ')']));
     }
     $same_n = 2;
-    while ($same_n < 100 && bm_post_id_by_title(trim("دانلود آهنگ {$artist} {$song} ({$same_n})"))) {
+    while ($same_n < 100 && bm_post_id_by_song_title($artist, "{$song} ({$same_n})")) {
         $same_n++;
     }
     $song    .= " ({$same_n})";
@@ -1746,9 +1800,9 @@ if ($title_exists) {
 /* -------------------------------------------------------
  |  4) ساخت نام‌ها و متن‌ها
  * ------------------------------------------------------ */
-$mytitle     = trim("دانلود آهنگ {$artist} {$song}");
+$mytitle     = bm_post_title($artist, $song); // «دانلود آهنگ {song} از {artist}» — $bot_title_template در config.php
 $post_name   = trim("{$artist_en} {$song_en}");
-$description = trim("دانلود آهنگ {$artist} {$song}");
+$description = $mytitle;
 $alt         = trim("آهنگ {$artist} {$song}");
 
 $mp3_name = bm_dl_file_name("{$artist_en} - {$song_en}");
@@ -1838,14 +1892,14 @@ if (is_wp_error($post_id) || !$post_id) {
 update_post_meta($post_id, '_bm_source_url', esc_url_raw($postUrl));
 
 /* -------------------------------------------------------
- |  8) سئو (Yoast)
+ |  8) سئو (Rank Math / Yoast) — عنوان متا = عنوان پست («دانلود آهنگ {song} از {artist}»)
  * ------------------------------------------------------ */
 $wpseo_title     = $mytitle;
 $wpseo_metadesc  = "دانلود آهنگ جدید {$artist} به نام {$song} با کیفیت 320 و 128، پخش آنلاین" . ($matnmusic !== '' ? ' و متن ترانه' : '');
 
 // کلمه کانونی اصلی = همان عبارتی که کاربر جستجو می‌کند؛ کلمات بعدی (با کاما) کلمات کانونی فرعی Rank Math هستند
 $focus_keywords = array_values(array_unique(array_filter([
-    "دانلود آهنگ {$artist} {$song}",
+    $mytitle,
     "{$artist} {$song}",
     ($artist_en !== $artist || $song_en !== $song) ? "{$artist_en} {$song_en}" : '',
 ])));

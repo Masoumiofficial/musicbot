@@ -493,12 +493,30 @@ function ps_fill_template($template, array $vars) {
     return trim((string) preg_replace('/\s+/u', ' ', strtr((string) $template, $vars)));
 }
 
+/**
+ * الگوهای عنوان یک نوع: اولی الگوی فعلی (title در config، پیش‌فرض «دانلود {label} {song} از {artist}»)،
+ * بقیه الگوهای قدیمی (title_legacy، پیش‌فرض «دانلود {label} {artist} {song}») که پست‌های قبلی سایت با آن ساخته شده‌اند
+ */
+function ps_title_templates(array $type) {
+    $current = !empty($type['title']) ? (string) $type['title'] : 'دانلود {label} {song} از {artist}';
+    $legacy  = isset($type['title_legacy']) ? array_values((array) $type['title_legacy']) : ['دانلود {label} {artist} {song}'];
+    return array_merge([$current], $legacy);
+}
+
 function ps_names(array $type, $artist, $song, $artist_en, $song_en) {
-    $vars     = ps_type_vars($type, $artist, $song, $artist_en, $song_en);
-    $template = !empty($type['title']) ? (string) $type['title'] : 'دانلود {label} {artist} {song}';
+    $vars      = ps_type_vars($type, $artist, $song, $artist_en, $song_en);
+    $templates = ps_title_templates($type);
+    $titles    = [];
+    foreach ($templates as $template) {
+        $title = ps_fill_template($template, $vars);
+        if ($title !== '' && !in_array($title, $titles, true)) {
+            $titles[] = $title;
+        }
+    }
 
     return [
-        'title'     => ps_fill_template($template, $vars),
+        'title'     => ps_fill_template($templates[0], $vars),
+        'titles'    => $titles, // عنوان فعلی + عنوان‌های الگوی قدیمی (برای تشخیص پست تکراری)
         'slug'      => trim("{$artist_en} {$song_en}"),
         'alt'       => trim("{$type['label']} {$artist} {$song}"),
         'file_base' => bm_dl_file_name("{$artist_en} - {$song_en}"),
@@ -508,12 +526,13 @@ function ps_names(array $type, $artist, $song, $artist_en, $song_en) {
 }
 
 /**
- * کلمه‌های کلیدی Rank Math: کلمه‌ی اصلی (الگوی keyword نوع، پیش‌فرض «دانلود {label} {artist} {song}»)،
- * کلمه‌های اضافه‌ی نوع (keywords در config، مثلاً «آهنگ های ترند»)، «خواننده آهنگ» و نام انگلیسی
+ * کلمه‌های کلیدی Rank Math: کلمه‌ی اصلی (الگوی keyword نوع، پیش‌فرض = همان الگوی عنوان «دانلود {label} {song} از {artist}»)،
+ * کلمه‌های اضافه‌ی نوع (keywords در config، مثلاً «آهنگ های ترند» یا «ریمیکس {song}»)، «خواننده آهنگ» و نام انگلیسی
  */
 function ps_keywords(array $type, $artist, $song, $artist_en, $song_en) {
-    $vars     = ps_type_vars($type, $artist, $song, $artist_en, $song_en);
-    $primary  = ps_fill_template(!empty($type['keyword']) ? $type['keyword'] : 'دانلود {label} {artist} {song}', $vars);
+    $vars      = ps_type_vars($type, $artist, $song, $artist_en, $song_en);
+    $templates = ps_title_templates($type);
+    $primary   = ps_fill_template(!empty($type['keyword']) ? $type['keyword'] : $templates[0], $vars);
     $keywords = [$primary];
     foreach ((array) (isset($type['keywords']) ? $type['keywords'] : []) as $extra) {
         $keywords[] = ps_fill_template($extra, $vars);
@@ -536,7 +555,7 @@ function ps_description(array $type, array $vars, $default) {
  * که حالا می‌خواهید «آهنگ ترند» شود) پیشنهاد می‌دهد همان پست را ویرایش کنید به‌جای ساختن پست دوباره
  */
 function ps_duplicate_message($duplicate, array $type) {
-    $message = 'پستی با همین عنوان وجود دارد (ID ' . (int) $duplicate . '): ' . get_permalink($duplicate)
+    $message = 'پستی با همین عنوان وجود دارد (ID ' . (int) $duplicate . ' «' . get_the_title($duplicate) . '»): ' . get_permalink($duplicate)
         . ' — ویرایش: ' . admin_url('post.php?post=' . (int) $duplicate . '&action=edit');
     $categories = isset($type['categories']) ? array_map('intval', (array) $type['categories']) : [];
     if (!empty($categories) && !has_category($categories[0], $duplicate)) {
@@ -605,16 +624,29 @@ function ps_build_content(array $type, array $args) {
     return $html;
 }
 
-/** آیدی پستی با همین عنوان (برای جلوگیری از پست تکراری) */
-function ps_duplicate_post_id($title) {
+/**
+ * آیدی پستی با همین عنوان (برای جلوگیری از پست تکراری)
+ * یک عنوان یا فهرست عنوان‌ها (عنوان فعلی + عنوان‌های الگوی قدیمی، ps_names()['titles']) — اولین پست پیداشده
+ */
+function ps_duplicate_post_id($titles) {
     global $wpdb;
-    return (int) $wpdb->get_var($wpdb->prepare(
-        "SELECT ID FROM {$wpdb->posts}
-         WHERE post_title = %s AND post_type = 'post'
-         AND post_status IN ('publish', 'draft', 'pending', 'future')
-         ORDER BY ID DESC LIMIT 1",
-        $title
-    ));
+    foreach ((array) $titles as $title) {
+        $title = (string) $title;
+        if ($title === '') {
+            continue;
+        }
+        $post_id = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT ID FROM {$wpdb->posts}
+             WHERE post_title = %s AND post_type = 'post'
+             AND post_status IN ('publish', 'draft', 'pending', 'future')
+             ORDER BY ID DESC LIMIT 1",
+            $title
+        ));
+        if ($post_id) {
+            return $post_id;
+        }
+    }
+    return 0;
 }
 
 /** نویسنده‌ی پست (مثل ربات) و اجرای ادامه‌ی کار با همان کاربر */
@@ -1151,7 +1183,7 @@ function ps_run_single() {
     }
 
     if (!ps_in('allow_duplicate')) {
-        $duplicate = ps_duplicate_post_id($names['title']);
+        $duplicate = ps_duplicate_post_id($names['titles']); // عنوان فعلی + عنوان‌های الگوی قدیمی
         if ($duplicate) {
             return ps_fail($report, ps_duplicate_message($duplicate, $type));
         }
@@ -1327,7 +1359,7 @@ function ps_run_video() {
     }
 
     if (!ps_in('allow_duplicate')) {
-        $duplicate = ps_duplicate_post_id($names['title']);
+        $duplicate = ps_duplicate_post_id($names['titles']); // عنوان فعلی + عنوان‌های الگوی قدیمی
         if ($duplicate) {
             return ps_fail($report, ps_duplicate_message($duplicate, $type));
         }
@@ -1529,7 +1561,7 @@ function ps_run_album() {
     }
 
     if (!ps_in('allow_duplicate')) {
-        $duplicate = ps_duplicate_post_id($names['title']);
+        $duplicate = ps_duplicate_post_id($names['titles']); // عنوان فعلی + عنوان‌های الگوی قدیمی
         if ($duplicate) {
             return ps_fail($report, ps_duplicate_message($duplicate, $type));
         }

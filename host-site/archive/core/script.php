@@ -100,7 +100,7 @@ if ($code < 200 || $code >= 300) {
 }
 
 if ($parsed['title'] === '' && ($artist !== '' || $song !== '')) {
-    $parsed['title'] = trim("دانلود آهنگ {$artist} {$song}");
+    $parsed['title'] = bm_archive_title($artist, $song);
 }
 
 bm_archive_json($parsed['status'], $parsed['reason'], $parsed['message'], $parsed);

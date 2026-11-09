@@ -26,14 +26,47 @@ if (!function_exists('bm_archive_norm')) {
         return str_replace([' ', "\xC2\xA0", "\xE2\x80\x8C", "\t", "\n", "\r"], '', (string) $text);
     }
 
+    /**
+     * الگوهای عنوان پست: اولی الگوی فعلی ربات ($bot_title_template در bot/config.php، پیش‌فرض
+     * «دانلود آهنگ {song} از {artist}»)، بقیه الگوهای قدیمی ($bot_title_legacy) که پست‌های قبلی سایت با آن ساخته شده‌اند
+     */
+    function bm_archive_title_templates() {
+        $current = isset($GLOBALS['bot_title_template']) ? trim((string) $GLOBALS['bot_title_template']) : '';
+        if ($current === '' || strpos($current, '{song}') === false) {
+            $current = 'دانلود آهنگ {song} از {artist}';
+        }
+        $legacy = isset($GLOBALS['bot_title_legacy']) ? array_values((array) $GLOBALS['bot_title_legacy']) : ['دانلود آهنگ {artist} {song}'];
+        return array_merge([$current], $legacy);
+    }
+
+    /** پر کردن الگوی عنوان (مثل bm_fill_title در اسکریپت ربات) */
+    function bm_archive_fill_title($template, $artist, $song) {
+        $title = strtr((string) $template, ['{artist}' => (string) $artist, '{song}' => (string) $song]);
+        return trim((string) preg_replace('/\s+/u', ' ', $title));
+    }
+
     /** عنوان پستی که ربات برای این آهنگ می‌سازد (مثل بخش 4 اسکریپت ربات) */
     function bm_archive_title($artist, $song) {
-        return trim("دانلود آهنگ {$artist} {$song}");
+        $templates = bm_archive_title_templates();
+        return bm_archive_fill_title($templates[0], $artist, $song);
+    }
+
+    /** همه‌ی عنوان‌های ممکن این آهنگ (الگوی فعلی + قدیمی) برای پیدا کردن پست‌های هم‌عنوان */
+    function bm_archive_title_variants($artist, $song) {
+        $titles = [];
+        foreach (bm_archive_title_templates() as $template) {
+            $title = bm_archive_fill_title($template, $artist, $song);
+            if ($title !== '' && !in_array($title, $titles, true)) {
+                $titles[] = $title;
+            }
+        }
+        return $titles;
     }
 
     /**
      * فهرست آهنگ‌ها از HTML صفحه‌ی هنرمند در سایت مبدأ
-     * خروجی: آرایه‌ای از ['url', 'artist', 'song', 'title'] از قدیمی‌ترین به جدیدترین
+     * خروجی: آرایه‌ای از ['url', 'artist', 'song', 'title', 'titles'] از قدیمی‌ترین به جدیدترین
+     * (title = عنوانی که ربات می‌سازد؛ titles = همان + عنوان‌های الگوی قدیمی برای مقایسه با پست‌های موجود)
      * (سایت مبدأ جدیدترین را اول نشان می‌دهد؛ «ارسال همه» باید از قدیمی‌ترین شروع کند)
      */
     function bm_archive_parse_listing($html) {
@@ -64,6 +97,7 @@ if (!function_exists('bm_archive_norm')) {
                 'artist' => $artist,
                 'song'   => $song,
                 'title'  => bm_archive_title($artist, $song),
+                'titles' => bm_archive_title_variants($artist, $song),
             ];
         }
 
@@ -117,9 +151,15 @@ if (!function_exists('bm_archive_norm')) {
         }
 
         // ---- 2) پست‌های هم‌عنوان (فاصله/نیم‌فاصله در مقایسه‌ی عنوان نادیده گرفته می‌شود)
+        //         با عنوان الگوی فعلی و الگوهای قدیمی («دانلود آهنگ {artist} {song}» پست‌های قبلی سایت)
         $title_keys = [];
-        foreach ($items as $item) {
-            $title_keys[bm_archive_title_key($item['title'])] = true;
+        foreach ($items as $i => $item) {
+            if (empty($item['titles']) || !is_array($item['titles'])) {
+                $items[$i]['titles'] = !empty($item['title']) ? [$item['title']] : bm_archive_title_variants($item['artist'], $item['song']);
+            }
+            foreach ($items[$i]['titles'] as $title) {
+                $title_keys[bm_archive_title_key($title)] = true;
+            }
         }
         $by_title = [];
         foreach (array_chunk(array_keys($title_keys), 200) as $chunk) {
@@ -187,8 +227,16 @@ if (!function_exists('bm_archive_norm')) {
                 continue;
             }
 
+            // هم‌عنوان با الگوی فعلی یا قدیمی؛ کلید عنوان فعلی برای هم‌نام‌های داخل همین فهرست
             $title_key = bm_archive_title_key($item['title']);
-            $group     = isset($by_title[$title_key]) ? $by_title[$title_key] : [];
+            $group     = [];
+            foreach ($items[$i]['titles'] as $title) {
+                $key = bm_archive_title_key($title);
+                if (!empty($by_title[$key])) {
+                    $group = $by_title[$key];
+                    break;
+                }
+            }
             if (empty($group)) {
                 if (isset($pending_titles[$title_key])) {
                     // قطعه‌ی دیگری با همین نام چند ردیف بالاتر در همین فهرست آماده‌ی ارسال است؛ این یکی بعد از آن
