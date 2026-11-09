@@ -1,0 +1,15 @@
+/* Hamrang – media library bits */
+.hamrang-state { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; line-height: 18px; background: #f0f0f1; color: #50575e; white-space: nowrap; }
+.hamrang-state.is-ok { background: #e6f6ea; color: #1e7a32; }
+.hamrang-state.is-stale { background: #fcf3e0; color: #8a5a00; }
+.hamrang-state.is-none { background: #f0f0f1; color: #646970; }
+.hamrang-state.is-na { background: transparent; color: #a7aaad; }
+.hamrang-state-note { font-size: 11px; color: #a7aaad; }
+.hamrang-state-buttons { display: block; margin-top: 6px; }
+.hamrang-state-buttons .button { margin: 0 0 4px; }
+.hamrang-state-message { display: block; font-size: 11px; margin-top: 4px; color: #50575e; min-height: 1em; }
+.hamrang-state-message.is-error { color: #b32d2e; }
+.hamrang-state-message.is-ok { color: #1e7a32; }
+.hamrang-state-wrap.is-busy .button { opacity: .6; pointer-events: none; }
+.compat-field-hamrang .hamrang-state-wrap { display: block; }
+.column-hamrang { width: 110px; }

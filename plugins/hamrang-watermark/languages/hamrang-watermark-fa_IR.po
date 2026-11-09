@@ -1,0 +1,881 @@
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Hamrang – Smart Cover Watermark 1.0.0\n"
+"Report-Msgid-Bugs-To: https://ahangban.ir/hamrang\n"
+"POT-Creation-Date: 2026-10-28 12:41+0000\n"
+"PO-Revision-Date: 2026-10-28 12:41+0000\n"
+"Last-Translator: Hamrang <info@ahangban.ir>\n"
+"Language-Team: Persian\n"
+"Language: fa_IR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+"X-Domain: hamrang-watermark\n"
+"X-Generator: hamrang-dev/make_pot.py\n"
+
+#. translators: 1: required PHP version, 2: current PHP version
+#: hamrang-watermark.php:60
+msgid "Hamrang needs PHP %1$s or newer; this server runs PHP %2$s."
+msgstr "هم‌رنگ به PHP %1$s یا جدیدتر نیاز دارد؛ این سرور PHP %2$s دارد."
+
+#: hamrang-watermark.php:61 hamrang-watermark.php:69
+msgid "Hamrang could not be activated"
+msgstr "هم‌رنگ فعال نشد"
+
+#: hamrang-watermark.php:68
+msgid ""
+"Hamrang needs the PHP GD image library, which is not enabled on this server."
+" Ask your host to enable the gd extension and try again."
+msgstr ""
+"هم‌رنگ به کتابخانه‌ی تصویر GD در PHP نیاز دارد که روی این سرور فعال نیست. از"
+" پشتیبانی هاست بخواهید افزونه‌ی gd را فعال کند و دوباره تلاش کنید."
+
+#: includes/class-hamrang-admin.php:102
+msgid "Choose logo"
+msgstr "انتخاب لوگو"
+
+#: includes/class-hamrang-admin.php:103
+msgid "Use this logo"
+msgstr "استفاده از این لوگو"
+
+#: includes/class-hamrang-admin.php:104
+msgid "Choose a preview image"
+msgstr "انتخاب تصویر برای پیش‌نمایش"
+
+#: includes/class-hamrang-admin.php:105
+msgid "Use this image"
+msgstr "استفاده از این تصویر"
+
+#: includes/class-hamrang-admin.php:106
+msgid "Preview failed. Save the settings and try again."
+msgstr "پیش‌نمایش ساخته نشد. تنظیمات را ذخیره کنید و دوباره امتحان کنید."
+
+#: includes/class-hamrang-admin.php:107
+msgid "The logo should be a transparent PNG."
+msgstr "لوگو باید یک PNG شفاف باشد."
+
+#: includes/class-hamrang-admin.php:108
+msgid "Working…"
+msgstr "در حال انجام…"
+
+#: includes/class-hamrang-admin.php:109
+msgid "Done"
+msgstr "تمام شد"
+
+#: includes/class-hamrang-admin.php:110
+msgid "Stopped"
+msgstr "متوقف شد"
+
+#: includes/class-hamrang-admin.php:111
+msgid "Nothing to process with this selection."
+msgstr "با این انتخاب چیزی برای پردازش وجود ندارد."
+
+#: includes/class-hamrang-admin.php:112
+msgid ""
+"Restore the originals of all selected images? Their watermark will be "
+"removed."
+msgstr ""
+"نسخه‌ی اصلی همه‌ی تصاویر انتخاب‌شده بازگردانده شود؟ واترمارک آن‌ها حذف "
+"می‌شود."
+
+#: includes/class-hamrang-admin.php:113
+msgid ""
+"Re-apply the watermark to every selected image, even the ones already up to "
+"date?"
+msgstr ""
+"واترمارک روی همه‌ی تصاویر انتخاب‌شده دوباره اعمال شود، حتی آن‌هایی که به‌روز"
+" هستند؟"
+
+#: includes/class-hamrang-admin.php:114
+msgid "The server did not answer — please try again."
+msgstr "سرور پاسخ نداد — لطفاً دوباره تلاش کنید."
+
+#: includes/class-hamrang-admin.php:115 admin/views/batch.php:82
+msgid "applied"
+msgstr "اعمال‌شده"
+
+#: includes/class-hamrang-admin.php:116 admin/views/batch.php:84
+msgid "skipped"
+msgstr "ردشده"
+
+#: includes/class-hamrang-admin.php:117 admin/views/batch.php:83
+msgid "restored"
+msgstr "بازگردانده‌شده"
+
+#: includes/class-hamrang-admin.php:118 admin/views/batch.php:85
+msgid "errors"
+msgstr "خطا"
+
+#: includes/class-hamrang-admin.php:119
+msgid "of"
+msgstr "از"
+
+#: includes/class-hamrang-admin.php:130
+msgid "Hamrang – Smart Cover Watermark"
+msgstr "هم‌رنگ – واترمارک هوشمند تصاویر"
+
+#: includes/class-hamrang-admin.php:131 includes/class-hamrang-admin.php:552
+#: includes/class-hamrang-admin.php:634 admin/views/settings.php:25
+msgid "Hamrang"
+msgstr "هم‌رنگ"
+
+#: includes/class-hamrang-admin.php:138
+msgid "Hamrang settings"
+msgstr "تنظیمات هم‌رنگ"
+
+#: includes/class-hamrang-admin.php:138 includes/class-hamrang-admin.php:218
+msgid "Settings"
+msgstr "تنظیمات"
+
+#: includes/class-hamrang-admin.php:139 includes/class-hamrang-admin.php:139
+#: admin/views/batch.php:19
+msgid "Batch processing"
+msgstr "پردازش دسته‌ای"
+
+#: includes/class-hamrang-admin.php:140
+msgid "Hamrang guide"
+msgstr "راهنمای هم‌رنگ"
+
+#: includes/class-hamrang-admin.php:140
+msgid "Guide"
+msgstr "راهنما"
+
+#: includes/class-hamrang-admin.php:298
+msgid "Select PNG"
+msgstr "انتخاب PNG"
+
+#: includes/class-hamrang-admin.php:299
+msgid "Remove"
+msgstr "حذف"
+
+#: includes/class-hamrang-admin.php:312 includes/class-hamrang-admin.php:329
+#: includes/class-hamrang-admin.php:448 includes/class-hamrang-batch.php:33
+msgid "You are not allowed to do this."
+msgstr "شما اجازه‌ی انجام این کار را ندارید."
+
+#: includes/class-hamrang-admin.php:362
+msgid "Could not create a temporary file."
+msgstr "فایل موقت ساخته نشد."
+
+#: includes/class-hamrang-admin.php:378
+msgid "Sample logo shown — select your own logo above."
+msgstr "لوگوی نمونه نمایش داده شده — لوگوی خودتان را در بالا انتخاب کنید."
+
+#: includes/class-hamrang-admin.php:403
+msgid "Not supported (JPEG, PNG, WebP only)"
+msgstr "پشتیبانی نمی‌شود (فقط JPEG، PNG و WebP)"
+
+#: includes/class-hamrang-admin.php:409
+msgid "Watermarked"
+msgstr "واترمارک‌شده"
+
+#: includes/class-hamrang-admin.php:411
+msgid "Watermarked (older settings)"
+msgstr "واترمارک‌شده (تنظیمات قدیمی)"
+
+#: includes/class-hamrang-admin.php:414
+msgid "no original stored"
+msgstr "نسخه‌ی اصلی ذخیره نشده"
+
+#: includes/class-hamrang-admin.php:417
+msgid "No watermark"
+msgstr "بدون واترمارک"
+
+#: includes/class-hamrang-admin.php:422 includes/class-hamrang-admin.php:535
+#: admin/views/batch.php:68
+msgid "Apply watermark"
+msgstr "اعمال واترمارک"
+
+#: includes/class-hamrang-admin.php:425
+msgid "Re-apply"
+msgstr "اعمال دوباره"
+
+#: includes/class-hamrang-admin.php:428 includes/class-hamrang-admin.php:540
+msgid "Restore original"
+msgstr "بازگردانی نسخه‌ی اصلی"
+
+#: includes/class-hamrang-admin.php:470 includes/class-hamrang-admin.php:494
+msgid "Invalid request."
+msgstr "درخواست نامعتبر است."
+
+#: includes/class-hamrang-admin.php:537
+msgid "Re-apply watermark"
+msgstr "اعمال دوباره‌ی واترمارک"
+
+#: includes/class-hamrang-admin.php:580
+msgid "Hamrang: apply watermark"
+msgstr "هم‌رنگ: اعمال واترمارک"
+
+#: includes/class-hamrang-admin.php:581
+msgid "Hamrang: restore originals"
+msgstr "هم‌رنگ: بازگردانی نسخه‌ی اصلی"
+
+#. translators: 1: applied, 2: restored, 3: skipped, 4: errors
+#: includes/class-hamrang-admin.php:659
+msgid "Hamrang: %1$d applied, %2$d restored, %3$d skipped, %4$d errors."
+msgstr "هم‌رنگ: %1$d اعمال شد، %2$d بازگردانده شد، %3$d رد شد، %4$d خطا."
+
+#: includes/class-hamrang-admin.php:674
+msgid ""
+"Hamrang: the PHP GD image library is not available, so no watermark can be "
+"applied. Ask your host to enable the gd extension."
+msgstr ""
+"هم‌رنگ: کتابخانه‌ی تصویر GD در PHP در دسترس نیست و هیچ واترمارکی اعمال "
+"نمی‌شود. از پشتیبانی هاست بخواهید افزونه‌ی gd را فعال کند."
+
+#. translators: %s: settings page URL
+#: includes/class-hamrang-admin.php:685
+msgid ""
+"Hamrang is active. <a href=\"%s\">Choose your logo and the look of the "
+"watermark</a> to get started."
+msgstr ""
+"هم‌رنگ فعال شد. برای شروع، <a href=\"%s\">لوگو و ظاهر واترمارک را انتخاب "
+"کنید</a>."
+
+#: includes/class-hamrang-media.php:73
+msgid "Already up to date"
+msgstr "از قبل به‌روز است"
+
+#: includes/class-hamrang-media.php:75
+msgid "Hamrang is switched off in its settings"
+msgstr "هم‌رنگ در تنظیمات خاموش است"
+
+#: includes/class-hamrang-media.php:77
+msgid "No logo selected yet — choose one in the Hamrang settings"
+msgstr "هنوز لوگویی انتخاب نشده — در تنظیمات هم‌رنگ یکی انتخاب کنید"
+
+#: includes/class-hamrang-media.php:79
+msgid "Not an image attachment"
+msgstr "این پیوست تصویر نیست"
+
+#: includes/class-hamrang-media.php:81
+msgid "Unsupported image type (JPEG, PNG and WebP are supported)"
+msgstr "نوع تصویر پشتیبانی نمی‌شود (JPEG، PNG و WebP پشتیبانی می‌شوند)"
+
+#: includes/class-hamrang-media.php:83
+msgid "The image file is missing on the server"
+msgstr "فایل تصویر روی سرور وجود ندارد"
+
+#: includes/class-hamrang-media.php:85
+msgid "Not enough PHP memory for an image this large"
+msgstr "حافظه‌ی PHP برای تصویری به این بزرگی کافی نیست"
+
+#: includes/class-hamrang-media.php:87
+msgid ""
+"Could not create the backup copy (check the uploads folder permissions)"
+msgstr "نسخه‌ی پشتیبان ساخته نشد (دسترسی پوشه‌ی uploads را بررسی کنید)"
+
+#: includes/class-hamrang-media.php:89
+msgid ""
+"Watermarked earlier with different settings and no original is stored — use "
+"\"Re-apply\" to stamp it anyway"
+msgstr ""
+"قبلاً با تنظیمات دیگری واترمارک شده و نسخه‌ی اصلی ذخیره نشده — برای اعمال "
+"روی همین تصویر از «اعمال دوباره» استفاده کنید"
+
+#: includes/class-hamrang-media.php:91
+msgid "No Hamrang watermark on this image"
+msgstr "این تصویر واترمارک هم‌رنگ ندارد"
+
+#: includes/class-hamrang-media.php:93
+msgid "No original copy is stored for this image"
+msgstr "نسخه‌ی اصلی این تصویر ذخیره نشده است"
+
+#: includes/class-hamrang-media.php:95
+msgid ""
+"The original could not be written back (check the uploads folder "
+"permissions)"
+msgstr "نسخه‌ی اصلی بازنویسی نشد (دسترسی پوشه‌ی uploads را بررسی کنید)"
+
+#: includes/class-hamrang-media.php:97
+msgid "Original restored"
+msgstr "نسخه‌ی اصلی بازگردانده شد"
+
+#: includes/class-hamrang-media.php:99
+msgid ""
+"Transparent PNG left alone (see the \"Leave transparent PNGs alone\" option)"
+msgstr "PNG شفاف دست نخورد (گزینه‌ی «PNG شفاف را رها کن» را ببینید)"
+
+#: includes/class-hamrang-media.php:101
+msgid "This image is the watermark logo itself"
+msgstr "این تصویر خودِ لوگوی واترمارک است"
+
+#: includes/class-hamrang-media.php:103
+msgid ""
+"This image is being processed by another request — try again in a moment"
+msgstr ""
+"این تصویر در حال پردازش توسط درخواست دیگری است — چند لحظه‌ی دیگر دوباره تلاش"
+" کنید"
+
+#: includes/class-hamrang-media.php:105
+msgid "Skipped by a hamrang_should_apply filter"
+msgstr "با فیلتر hamrang_should_apply رد شد"
+
+#: includes/engine.php:101 includes/engine.php:115
+msgid "bottom right"
+msgstr "پایین راست"
+
+#: includes/engine.php:102 includes/engine.php:116
+msgid "bottom left"
+msgstr "پایین چپ"
+
+#: includes/engine.php:103 includes/engine.php:113
+msgid "top right"
+msgstr "بالا راست"
+
+#: includes/engine.php:104 includes/engine.php:114
+msgid "top left"
+msgstr "بالا چپ"
+
+#: includes/engine.php:1099
+msgid "square"
+msgstr "مربع"
+
+#: includes/engine.php:1099
+msgid "rectangular"
+msgstr "مستطیل"
+
+#. translators: 1: square/rectangular, 2: plate width in px, 3: hex colour, 4:
+#. position
+#: includes/engine.php:1102
+msgid "Logo applied on a frosted %1$s plate (%2$dpx, %3$s, %4$s)"
+msgstr "لوگو روی پلاک شیشه‌ای %1$s اعمال شد (%2$d پیکسل، %3$s، %4$s)"
+
+#. translators: 1: square/rectangular, 2: plate width in px, 3: hex colour, 4:
+#. position
+#: includes/engine.php:1105
+msgid "Logo applied on a solid %1$s plate (%2$dpx, %3$s, %4$s)"
+msgstr "لوگو روی پلاک پُر %1$s اعمال شد (%2$d پیکسل، %3$s، %4$s)"
+
+#: includes/engine.php:1108
+msgid "dark logo on a light plate"
+msgstr "لوگوی تیره روی پلاک روشن"
+
+#. translators: 1: logo width in px, 2: position
+#: includes/engine.php:1113
+msgid "Logo applied (%1$dpx, %2$s)"
+msgstr "لوگو اعمال شد (%1$d پیکسل، %2$s)"
+
+#: includes/engine.php:1115
+msgid "dark variant on a light corner"
+msgstr "نسخه‌ی تیره روی گوشه‌ی روشن"
+
+#. translators: 1: width, 2: height
+#: includes/engine.php:1121
+msgid "Image too small (%1$d×%2$d) — left untouched"
+msgstr "تصویر خیلی کوچک است (%1$d×%2$d) — دست نخورد"
+
+#: includes/engine.php:1126
+msgid ""
+"Watermark failed — the GD image library is not available on this server"
+msgstr "واترمارک انجام نشد — کتابخانه‌ی GD روی این سرور در دسترس نیست"
+
+#: includes/engine.php:1128
+msgid "Watermark failed — logo file not found"
+msgstr "واترمارک انجام نشد — فایل لوگو پیدا نشد"
+
+#: includes/engine.php:1130
+msgid "Watermark failed — the logo must be a transparent PNG"
+msgstr "واترمارک انجام نشد — لوگو باید PNG شفاف باشد"
+
+#: includes/engine.php:1132
+msgid "Watermark failed — the logo is not a valid image"
+msgstr "واترمارک انجام نشد — فایل لوگو تصویر معتبری نیست"
+
+#: includes/engine.php:1134
+msgid "Watermark failed — the image could not be read"
+msgstr "واترمارک انجام نشد — تصویر خوانده نشد"
+
+#: includes/engine.php:1136
+msgid ""
+"Watermark failed — the image could not be saved (check folder permissions)"
+msgstr "واترمارک انجام نشد — تصویر ذخیره نشد (دسترسی پوشه را بررسی کنید)"
+
+#: includes/engine.php:1138
+msgid "Watermarking is disabled"
+msgstr "واترمارک غیرفعال است"
+
+#: includes/engine.php:1140
+msgid "Watermark failed"
+msgstr "واترمارک انجام نشد"
+
+#: admin/views/batch.php:19
+msgid "Watermark or restore the images you already have"
+msgstr "واترمارک یا بازگردانی تصاویری که از قبل دارید"
+
+#: admin/views/batch.php:23
+msgid ""
+"Hamrang is switched off in its settings, so nothing can be applied right "
+"now."
+msgstr "هم‌رنگ در تنظیمات خاموش است؛ فعلاً هیچ واترمارکی اعمال نمی‌شود."
+
+#. translators: %s: settings URL
+#: admin/views/batch.php:30
+msgid ""
+"No logo selected yet — <a href=\"%s\">choose one in the settings</a> before "
+"running the batch."
+msgstr ""
+"هنوز لوگویی انتخاب نشده — قبل از اجرای پردازش دسته‌ای <a href=\"%s\">در "
+"تنظیمات یکی انتخاب کنید</a>."
+
+#: admin/views/batch.php:41
+msgid "1. Which images?"
+msgstr "۱. کدام تصاویر؟"
+
+#: admin/views/batch.php:45
+msgid "Featured images only"
+msgstr "فقط تصاویر شاخص"
+
+#: admin/views/batch.php:45
+msgid "Every image that is the featured image of at least one post."
+msgstr "هر تصویری که تصویر شاخص دست‌کم یک نوشته است."
+
+#: admin/views/batch.php:49
+msgid "Entire media library"
+msgstr "کل کتابخانه‌ی رسانه"
+
+#: admin/views/batch.php:49
+msgid "All JPEG, PNG and WebP attachments."
+msgstr "همه‌ی پیوست‌های JPEG، PNG و WebP."
+
+#: admin/views/batch.php:53
+msgid "Never watermarked"
+msgstr "هرگز واترمارک‌نشده"
+
+#: admin/views/batch.php:53
+msgid "Images Hamrang has not touched yet."
+msgstr "تصاویری که هم‌رنگ هنوز به آن‌ها دست نزده."
+
+#: admin/views/batch.php:57
+msgid "Already watermarked"
+msgstr "قبلاً واترمارک‌شده"
+
+#. translators: %s: number of images
+#: admin/views/batch.php:60
+msgid "Currently %s images. Use this with \"Restore originals\" or \"Re-apply\"."
+msgstr ""
+"در حال حاضر %s تصویر. برای «بازگردانی نسخه‌ی اصلی» یا «اعمال دوباره» از این "
+"گزینه استفاده کنید."
+
+#: admin/views/batch.php:66
+msgid "2. What to do"
+msgstr "۲. چه کاری انجام شود"
+
+#: admin/views/batch.php:69
+msgid "Re-apply to all"
+msgstr "اعمال دوباره روی همه"
+
+#: admin/views/batch.php:70
+msgid "Restore originals"
+msgstr "بازگردانی نسخه‌ی اصلی"
+
+#: admin/views/batch.php:71
+msgid "Stop"
+msgstr "توقف"
+
+#: admin/views/batch.php:73
+msgid ""
+"\"Apply\" skips images that already carry the current watermark and "
+"refreshes the ones stamped with older settings. \"Re-apply\" redoes every "
+"selected image. \"Restore\" puts the stored originals back and rebuilds "
+"their thumbnails."
+msgstr ""
+"«اعمال واترمارک» تصاویری را که همین حالا واترمارک فعلی را دارند رد می‌کند و "
+"تصاویر مهرخورده با تنظیمات قدیمی را به‌روز می‌کند. «اعمال دوباره» همه‌ی "
+"تصاویر انتخاب‌شده را از نو می‌سازد. «بازگردانی» نسخه‌های اصلی ذخیره‌شده را "
+"برمی‌گرداند و بندانگشتی‌ها را دوباره می‌سازد."
+
+#: admin/views/batch.php:74
+msgid ""
+"Keep this tab open while it runs. You can stop at any time and continue "
+"later — nothing is processed twice."
+msgstr ""
+"در حین اجرا این تب را باز نگه دارید. هر زمان می‌توانید متوقف کنید و بعداً "
+"ادامه دهید — هیچ تصویری دو بار پردازش نمی‌شود."
+
+#: admin/views/batch.php:78
+msgid "Progress"
+msgstr "پیشرفت"
+
+#: admin/views/batch.php:93
+msgid "Good to know"
+msgstr "خوب است بدانید"
+
+#: admin/views/batch.php:95
+msgid ""
+"Each image is processed on the server in small groups; a few thousand covers"
+" take a while — just leave the tab open."
+msgstr ""
+"تصاویر در گروه‌های کوچک روی سرور پردازش می‌شوند؛ چند هزار کاور کمی زمان "
+"می‌برد — فقط تب را باز بگذارید."
+
+#: admin/views/batch.php:96
+msgid ""
+"Thumbnails of every size are rebuilt from the watermarked image, so the "
+"whole site shows the new cover."
+msgstr ""
+"بندانگشتی‌های همه‌ی اندازه‌ها از روی تصویر واترمارک‌شده دوباره ساخته می‌شوند"
+" تا کل سایت کاور جدید را نشان دهد."
+
+#: admin/views/batch.php:97
+msgid ""
+"If a CDN or cache plugin is in front of your site, purge its image cache "
+"afterwards."
+msgstr "اگر CDN یا افزونه‌ی کش دارید، بعد از پردازش کش تصاویر را پاک کنید."
+
+#: admin/views/batch.php:98
+msgid ""
+"Restoring needs the stored original (\"Keep the untouched original\" "
+"option). Images stamped without it cannot be reverted."
+msgstr ""
+"بازگردانی به نسخه‌ی اصلی ذخیره‌شده نیاز دارد (گزینه‌ی «نگه‌داشتن نسخه‌ی "
+"اصلی»). تصاویری که بدون آن واترمارک شده‌اند قابل بازگردانی نیستند."
+
+#: admin/views/settings.php:25
+msgid "Smart cover watermark"
+msgstr "واترمارک هوشمند تصاویر"
+
+#: admin/views/settings.php:30
+msgid "Settings saved."
+msgstr "تنظیمات ذخیره شد."
+
+#: admin/views/settings.php:33
+msgid ""
+"No logo selected yet. Pick a transparent PNG below — a white logo works best"
+" on the colour plate."
+msgstr ""
+"هنوز لوگویی انتخاب نشده. در پایین یک PNG شفاف انتخاب کنید — لوگوی سفید روی "
+"پلاک رنگی بهترین نتیجه را می‌دهد."
+
+#: admin/views/settings.php:44
+msgid "When to watermark"
+msgstr "چه زمانی واترمارک شود"
+
+#: admin/views/settings.php:50
+msgid "Hamrang is enabled"
+msgstr "هم‌رنگ فعال است"
+
+#: admin/views/settings.php:52
+msgid ""
+"Master switch. When off, nothing is watermarked — not even from the batch "
+"tool."
+msgstr ""
+"کلید اصلی. وقتی خاموش باشد هیچ‌چیز واترمارک نمی‌شود — حتی از ابزار دسته‌ای."
+
+#: admin/views/settings.php:56
+msgid "Apply automatically to"
+msgstr "اعمال خودکار روی"
+
+#: admin/views/settings.php:61
+msgid "Featured images"
+msgstr "تصاویر شاخص"
+
+#: admin/views/settings.php:62
+msgid ""
+"The moment an image is set as the featured image of a post (editor, REST "
+"API, importers, bots). Recommended for covers."
+msgstr ""
+"همان لحظه‌ای که تصویری تصویر شاخص یک نوشته می‌شود (ویرایشگر، REST API، "
+"درون‌ریزها، ربات‌ها). برای کاورها پیشنهاد می‌شود."
+
+#: admin/views/settings.php:68
+msgid "Every new image upload"
+msgstr "هر آپلود جدید"
+
+#: admin/views/settings.php:69
+msgid ""
+"JPEG, PNG and WebP uploads are stamped before the thumbnails are generated."
+msgstr "آپلودهای JPEG، PNG و WebP قبل از ساخت بندانگشتی‌ها واترمارک می‌شوند."
+
+#: admin/views/settings.php:75
+msgid "Nothing automatically"
+msgstr "هیچ‌چیز خودکار"
+
+#: admin/views/settings.php:76
+msgid "Only when you use the batch tool or the buttons in the media library."
+msgstr ""
+"فقط وقتی از ابزار دسته‌ای یا دکمه‌های کتابخانه‌ی رسانه استفاده می‌کنید."
+
+#: admin/views/settings.php:83
+msgid "Post types"
+msgstr "نوع نوشته‌ها"
+
+#: admin/views/settings.php:89
+msgid "Leave everything unchecked to cover all post types."
+msgstr "اگر هیچ‌کدام را تیک نزنید، همه‌ی نوع نوشته‌ها شامل می‌شوند."
+
+#: admin/views/settings.php:93
+msgid "Leave transparent PNGs alone (logos, icons, stickers)"
+msgstr "PNG شفاف را رها کن (لوگوها، آیکون‌ها، استیکرها)"
+
+#: admin/views/settings.php:94
+msgid ""
+"Applies to automatic processing and the batch tool; \"Re-apply\" on a single"
+" image still stamps it."
+msgstr ""
+"در پردازش خودکار و ابزار دسته‌ای اعمال می‌شود؛ «اعمال دوباره» روی یک تصویر "
+"همچنان آن را واترمارک می‌کند."
+
+#: admin/views/settings.php:98
+msgid ""
+"Keep the untouched original next to each processed image (lets you restore "
+"or re-style later)"
+msgstr ""
+"نسخه‌ی دست‌نخورده‌ی هر تصویر پردازش‌شده کنار آن نگه داشته شود (امکان "
+"بازگردانی یا تغییر ظاهر در آینده)"
+
+#: admin/views/settings.php:99
+msgid ""
+"Strongly recommended. Without it a watermark cannot be removed or re-applied"
+" cleanly."
+msgstr ""
+"قویاً توصیه می‌شود. بدون آن، واترمارک قابل حذف یا اعمال دوباره‌ی تمیز نیست."
+
+#: admin/views/settings.php:104
+msgid "Skip images smaller than"
+msgstr "رد کردن تصاویر کوچک‌تر از"
+
+#: admin/views/settings.php:106
+msgid ""
+"Shorter side in pixels. Thumbnails and icons below this size are never "
+"touched."
+msgstr ""
+"ضلع کوچک‌تر به پیکسل. بندانگشتی‌ها و آیکون‌های کوچک‌تر از این اندازه هرگز "
+"دست نمی‌خورند."
+
+#: admin/views/settings.php:109
+msgid "JPEG / WebP quality"
+msgstr "کیفیت JPEG / WebP"
+
+#: admin/views/settings.php:117 admin/views/settings.php:272
+msgid "Logo"
+msgstr "لوگو"
+
+#: admin/views/settings.php:121
+msgid "Logo (transparent PNG, preferably white)"
+msgstr "لوگو (PNG شفاف، ترجیحاً سفید)"
+
+#: admin/views/settings.php:125
+msgid "Dark variant (optional)"
+msgstr "نسخه‌ی تیره (اختیاری)"
+
+#: admin/views/settings.php:127
+msgid ""
+"Used automatically on light plates and light corners so the logo always "
+"stays readable."
+msgstr ""
+"روی پلاک‌ها و گوشه‌های روشن به‌طور خودکار استفاده می‌شود تا لوگو همیشه خوانا"
+" بماند."
+
+#: admin/views/settings.php:133
+msgid "Corner"
+msgstr "گوشه"
+
+#: admin/views/settings.php:145
+msgid "Logo width"
+msgstr "عرض لوگو"
+
+#: admin/views/settings.php:147
+msgid "Percent of the image width (free logo and rectangular plate)."
+msgstr "درصدی از عرض تصویر (لوگوی آزاد و پلاک مستطیل)."
+
+#: admin/views/settings.php:150
+msgid "Distance from the edges"
+msgstr "فاصله از لبه‌ها"
+
+#: admin/views/settings.php:158
+msgid "Soft shadow under the logo / plate"
+msgstr "سایه‌ی نرم زیر لوگو / پلاک"
+
+#: admin/views/settings.php:160
+msgid "Shadow strength (no plate)"
+msgstr "شدت سایه (بدون پلاک)"
+
+#: admin/views/settings.php:165
+msgid "Logo opacity (no plate)"
+msgstr "شفافیت لوگو (بدون پلاک)"
+
+#: admin/views/settings.php:173
+msgid "Colour plate"
+msgstr "پلاک رنگی"
+
+#: admin/views/settings.php:174
+msgid ""
+"The plate is a rounded badge behind the logo. In \"auto colour\" mode it "
+"takes the boldest colour of each image, so the badge always looks like it "
+"belongs to the cover."
+msgstr ""
+"پلاک یک کادر گردگوشه پشت لوگو است. در حالت «رنگ خودکار» پررنگ‌ترین رنگ هر "
+"تصویر را می‌گیرد تا همیشه بخشی از خود کاور به نظر برسد."
+
+#: admin/views/settings.php:177
+msgid "Plate shape"
+msgstr "شکل پلاک"
+
+#: admin/views/settings.php:179
+msgid "Auto (square or rectangle, by logo shape)"
+msgstr "خودکار (مربع یا مستطیل، بر اساس شکل لوگو)"
+
+#: admin/views/settings.php:180
+msgid "Square"
+msgstr "مربع"
+
+#: admin/views/settings.php:181
+msgid "Rectangle"
+msgstr "مستطیل"
+
+#: admin/views/settings.php:182
+msgid "No plate (logo only)"
+msgstr "بدون پلاک (فقط لوگو)"
+
+#: admin/views/settings.php:189
+msgid "Style"
+msgstr "سبک"
+
+#: admin/views/settings.php:191
+msgid "Frosted glass"
+msgstr "شیشه‌ای"
+
+#: admin/views/settings.php:192
+msgid "Solid"
+msgstr "پُر"
+
+#: admin/views/settings.php:196
+msgid "Colour"
+msgstr "رنگ"
+
+#: admin/views/settings.php:198
+msgid "Auto — dominant colour of the image"
+msgstr "خودکار — رنگ غالب تصویر"
+
+#: admin/views/settings.php:199
+msgid "Fixed colour"
+msgstr "رنگ ثابت"
+
+#: admin/views/settings.php:209
+msgid "Square plate size"
+msgstr "اندازه‌ی پلاک مربع"
+
+#: admin/views/settings.php:211
+msgid ""
+"Percent of the image width. The rectangular plate follows the logo width "
+"instead."
+msgstr "درصدی از عرض تصویر. پلاک مستطیل به‌جای آن از عرض لوگو پیروی می‌کند."
+
+#: admin/views/settings.php:214
+msgid "Plate fill"
+msgstr "پُری پلاک"
+
+#: admin/views/settings.php:216
+msgid ""
+"100 = opaque. Lower values let the blurred image show through the glass."
+msgstr ""
+"۱۰۰ یعنی کاملاً پُر. مقادیر کمتر اجازه می‌دهند تصویر تارشده از پشت شیشه دیده"
+" شود."
+
+#: admin/views/settings.php:219
+msgid "Corner roundness"
+msgstr "گردی گوشه‌ها"
+
+#: admin/views/settings.php:223
+msgid "Padding around the logo"
+msgstr "حاشیه‌ی دور لوگو"
+
+#: admin/views/settings.php:232
+msgid "Housekeeping"
+msgstr "نگهداری"
+
+#: admin/views/settings.php:234
+msgid ""
+"When the plugin is deleted, also remove its data (settings, per-image "
+"records and stored originals). Watermarked images stay as they are."
+msgstr ""
+"هنگام حذف افزونه، داده‌های آن هم پاک شود (تنظیمات، رکورد هر تصویر و نسخه‌های"
+" اصلی ذخیره‌شده). تصاویر واترمارک‌شده همان‌طور می‌مانند."
+
+#: admin/views/settings.php:235
+msgid ""
+"Tip: run \"Restore originals\" in the batch tool first if you want your "
+"untouched images back before uninstalling."
+msgstr ""
+"نکته: اگر می‌خواهید قبل از حذف، تصاویر دست‌نخورده را پس بگیرید، اول "
+"«بازگردانی نسخه‌ی اصلی» را در ابزار دسته‌ای اجرا کنید."
+
+#: admin/views/settings.php:240
+msgid "Save settings"
+msgstr "ذخیره‌ی تنظیمات"
+
+#: admin/views/settings.php:241
+msgid "Batch processing →"
+msgstr "پردازش دسته‌ای ←"
+
+#: admin/views/settings.php:247
+msgid "Live preview"
+msgstr "پیش‌نمایش زنده"
+
+#: admin/views/settings.php:252
+msgid "Change any option — the preview updates with the unsaved values."
+msgstr ""
+"هر گزینه‌ای را تغییر دهید — پیش‌نمایش با مقادیر ذخیره‌نشده به‌روز می‌شود."
+
+#: admin/views/settings.php:260
+msgid "Preview on one of your own images"
+msgstr "پیش‌نمایش روی یکی از تصاویر خودتان"
+
+#: admin/views/settings.php:267
+msgid "Status"
+msgstr "وضعیت"
+
+#: admin/views/settings.php:269
+msgid "GD image library"
+msgstr "کتابخانه‌ی تصویر GD"
+
+#: admin/views/settings.php:269
+msgid "available"
+msgstr "در دسترس"
+
+#: admin/views/settings.php:269
+msgid "missing"
+msgstr "موجود نیست"
+
+#: admin/views/settings.php:270
+msgid "WebP support"
+msgstr "پشتیبانی WebP"
+
+#: admin/views/settings.php:270
+msgid "yes"
+msgstr "بله"
+
+#: admin/views/settings.php:270
+msgid "no"
+msgstr "خیر"
+
+#: admin/views/settings.php:271
+msgid "memory"
+msgstr "حافظه"
+
+#: admin/views/settings.php:272
+msgid "selected"
+msgstr "انتخاب شده"
+
+#: admin/views/settings.php:272
+msgid "not selected"
+msgstr "انتخاب نشده"
+
+#. translators: %s: number of images
+#: admin/views/settings.php:276
+msgid "%s image carries the watermark"
+msgid_plural "%s images carry the watermark"
+msgstr[0] "%s تصویر واترمارک دارد"
+msgstr[1] "%s تصویر واترمارک دارند"
+
+#: admin/views/settings.php:280
+msgid ""
+"Changed the logo or the look? Already-stamped images keep the old look until"
+" you run the batch tool (up-to-date ones are skipped automatically)."
+msgstr ""
+"لوگو یا ظاهر را عوض کرده‌اید؟ تصاویر قبلاً واترمارک‌شده تا زمانی که ابزار "
+"دسته‌ای را اجرا نکنید ظاهر قدیمی را نگه می‌دارند (تصاویر به‌روز خودکار رد "
+"می‌شوند)."

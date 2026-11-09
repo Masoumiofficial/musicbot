@@ -9,6 +9,12 @@ global $wpdb;
 require_once __DIR__ . '/auth.php';
 // لوگوی سایت روی کاور (تنظیمات $bot_watermark_* در config.php)
 require_once __DIR__ . '/watermark.php';
+// WebP برای سایزهای نمایشی کاور (فایل اصلی دست‌نخورده می‌ماند؛ تنظیمات $bot_webp_* در config.php)
+require_once __DIR__ . '/webp.php';
+
+// هاست دانلود خودکار: $urldlhost خالی در config.php → AHANGBAN_DL_HOST (wp-config) یا https://dl.<دامنه‌ی سایت>؛
+// $functions_dl_music خالی → {$urldlhost}/music.php — این‌جا (بعد از wp-load) چون به home_url نیاز دارد
+bm_resolve_dl_config();
 
 $dir_wp = date('Y/m');
 
@@ -79,6 +85,49 @@ function bm_dl_file_name($text) {
     $text = preg_replace('/\s+/u', ' ', $text);
     $text = preg_replace('/[\\\\\/\?#%\*:"<>\|\x00-\x1F]+/u', '', $text);
     return trim($text, " .-");
+}
+
+/**
+ * پسوند کیفیت در نام فایل/پوشه‌ی هاست دانلود: کیفیت اصلی (320) بدون پسوند، 128 با « [128]»
+ *   Artist - Song.mp3   و   Artist - Song [128].mp3      (آلبوم: «Artist - Album/» و «Artist - Album [128]/» و zip‌ها)
+ * فایل‌های قدیمی با «[320]» سر جایشان می‌مانند (لینک پست‌های قبلی عوض نمی‌شود؛ bot/dl-repair.php نام موجود را نگه می‌دارد).
+ * پیش‌فرض گیرنده‌های هاست دانلود (hostdl/music.php و hostdl/album.php) همین قاعده است.
+ */
+function bm_dl_quality_suffix($quality) {
+    return (string) $quality === '128' ? ' [128]' : '';
+}
+
+/** نام فایل MP3 یک کیفیت از روی نام پایه («Artist - Song»): bm_music_file_name('A - B', '320') = «A - B.mp3» */
+function bm_music_file_name($mp3_name, $quality) {
+    return $mp3_name . bm_dl_quality_suffix($quality) . '.mp3';
+}
+
+/**
+ * متن ترانه به‌صورت متن ساده برای تگ ID3 داخل فایل MP3 (USLT؛ پلیرها آن را به‌عنوان Lyrics نشان می‌دهند):
+ * تگ‌های HTML برداشته می‌شود (br / p / div → خط جدید)، موجودیت‌ها (&amp; …) باز، فاصله‌های اضافه‌ی هر خط گرفته
+ * و بیشتر از یک خط خالی پشت سر هم نمی‌ماند. خالی → '' (تگ نوشته نمی‌شود)
+ */
+function bm_lyrics_plain($text) {
+    $text = is_string($text) ? $text : '';
+    if (trim($text) === '') {
+        return '';
+    }
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $text = preg_replace('#<br\s*/?>#iu', "\n", $text);
+    $text = preg_replace('#</(p|div|blockquote)>#iu', "\n\n", $text); // پاراگراف → یک خط خالی (بند ترانه)
+    $text = preg_replace('#</(li|h[1-6]|tr)>#iu', "\n", $text);
+    $text = wp_strip_all_tags($text, false);
+    $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $text = str_replace("\xC2\xA0", ' ', $text);
+    $lines = [];
+    foreach (explode("\n", $text) as $line) {
+        $lines[] = trim(preg_replace('/[ \t]+/u', ' ', $line));
+    }
+    $text = trim(preg_replace("/\n{3,}/", "\n\n", implode("\n", $lines)));
+    if (function_exists('mb_substr') && mb_strlen($text, 'UTF-8') > 20000) {
+        $text = mb_substr($text, 0, 20000, 'UTF-8');
+    }
+    return $text;
 }
 
 /**
@@ -583,6 +632,374 @@ function bm_dl_response_info($response) {
 }
 
 /**
+ * از پاسخ JSON هاست دانلود (music.php نسخه‌ی ۲): کدام کیفیت‌ها واقعاً روی هاست نشستند؟
+ * ورودی: خروجی bm_dl_response_info() یا هر آرایه‌ای که کلید files (آرایه‌ی فایل‌های پاسخ) داشته باشد
+ * خروجی: ['320' => true|false|null, '128' => true|false|null]؛ null یعنی این کیفیت اصلاً خواسته نشده بود (مبدأ نداشت)
+ *         و برای پاسخ غیر JSON (music.php قدیمی) null، چون تفکیک کیفیت‌ها معلوم نیست.
+ */
+function bm_dl_landed(array $info) {
+    if (!isset($info['files']) || !is_array($info['files']) || (array_key_exists('json', $info) && !is_array($info['json']))) {
+        return null;
+    }
+    $landed = ['320' => null, '128' => null];
+    foreach ($info['files'] as $file) {
+        $quality = isset($file['quality']) ? (string) $file['quality'] : '';
+        if (array_key_exists($quality, $landed)) {
+            $landed[$quality] = !empty($file['ok']);
+        }
+    }
+    return $landed;
+}
+
+/**
+ * متن خطای یک کیفیت در پاسخ هاست دانلود (برای گزارش)، مثل «HTTP 404 از سرور مبدأ (فایل در مبدأ نیست)»؛ اگر آن کیفیت خطا نداشت ''
+ */
+function bm_dl_file_error(array $info, $quality) {
+    $files = isset($info['files']) && is_array($info['files']) ? $info['files'] : [];
+    foreach ($files as $file) {
+        if (isset($file['quality']) && (string) $file['quality'] === (string) $quality && empty($file['ok'])) {
+            return isset($file['error']) && (string) $file['error'] !== '' ? (string) $file['error'] : 'نامشخص';
+        }
+    }
+    return '';
+}
+
+/**
+ * آیا این خطای انتقال از آن نوعی است که تکرارش فایده ندارد؟
+ * (فایل در مبدأ نیست: HTTP 404/410؛ یا آدرس مبدأ به‌جای فایل صوتی چیز دیگری مثل عکس برمی‌گرداند؛ یا فایل خالی است)
+ */
+function bm_dl_error_is_permanent($error) {
+    $error = (string) $error;
+    if ($error === '') {
+        return false;
+    }
+    foreach (['HTTP 404', 'HTTP 410', 'is not audio', 'empty file'] as $needle) {
+        if (strpos($error, $needle) !== false) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** «هر دو کیفیت» / «فقط 128» / «فقط 320» / «هیچ‌کدام» از روی ['320' => bool, '128' => bool] */
+function bm_quality_label(array $have) {
+    $h320 = !empty($have['320']);
+    $h128 = !empty($have['128']);
+    if ($h320 && $h128) {
+        return 'هر دو کیفیت';
+    }
+    if ($h128) {
+        return 'فقط 128';
+    }
+    if ($h320) {
+        return 'فقط 320';
+    }
+    return 'هیچ‌کدام';
+}
+
+/**
+ * هماهنگ کردن متاهای music320 / music128 / online با فایل‌هایی که واقعاً روی هاست دانلود هستند
+ *   $have  = ['320' => bool, '128' => bool]   کدام کیفیت‌ها روی هاست هست
+ *   $links = ['320' => لینک, '128' => لینک]   لینک هر کیفیت روی هاست دانلود
+ * قاعده (همان قاعده‌ی پست‌ساز و اسکریپت اصلی قالب): music320 فقط وقتی فایل 320 هست؛ music128 و online به فایل 128 و در
+ * نبودِ 128 به فایل 320 اشاره می‌کنند. کیفیتی که روی هاست نیست از پست برداشته می‌شود تا دکمه‌ی دانلود خراب (404) نماند.
+ * اگر هیچ فایلی نباشد به متاها دست نمی‌زند (پست پیش‌نویس می‌ماند و bot/dl-repair.php از روی همین متاها ترمیمش می‌کند).
+ * خروجی: ['usable' => bool (دست‌کم یک کیفیت هست), 'label' => bm_quality_label, 'changes' => [متن تغییرها]]
+ */
+function bm_sync_music_metas($post_id, array $have, array $links) {
+    $changes = [];
+    $link320 = !empty($have['320']) && !empty($links['320']) ? esc_url_raw((string) $links['320']) : '';
+    $link128 = !empty($have['128']) && !empty($links['128']) ? esc_url_raw((string) $links['128']) : '';
+    $online  = $link128 !== '' ? $link128 : $link320;
+
+    if ($online === '') {
+        return ['usable' => false, 'label' => bm_quality_label($have), 'changes' => []];
+    }
+
+    $cur320 = (string) get_post_meta($post_id, 'music320', true);
+    if ($link320 === '') {
+        if ($cur320 !== '') {
+            delete_post_meta($post_id, 'music320');
+            $changes[] = 'لینک 320 از پست برداشته شد (فایل 320 روی هاست دانلود نیست)';
+        }
+    } elseif ($cur320 !== $link320) {
+        update_post_meta($post_id, 'music320', $link320);
+        $changes[] = 'لینک 320 روی پست گذاشته شد';
+    }
+
+    $cur128    = (string) get_post_meta($post_id, 'music128', true);
+    $curOnline = (string) get_post_meta($post_id, 'online', true);
+    if ($cur128 !== $online || $curOnline !== $online) {
+        update_post_meta($post_id, 'music128', $online);
+        update_post_meta($post_id, 'online', $online);
+        $changes[] = $link128 !== ''
+            ? 'لینک 128 و پخش آنلاین روی پست گذاشته شد'
+            : 'لینک 128 و پخش آنلاین به فایل 320 وصل شد (فایل 128 روی هاست دانلود نیست)';
+    }
+
+    return ['usable' => true, 'label' => bm_quality_label($have), 'changes' => $changes];
+}
+
+/**
+ * ثبت وضعیت انتقال روی پست (bot/dl-repair.php از همین‌ها استفاده می‌کند):
+ *   ok      → هر دو متای _bm_download_failed و _bm_download_partial پاک می‌شود
+ *   partial → فقط بعضی کیفیت‌ها رسیده و پست با همان‌ها منتشر شده؛ _bm_download_partial = توضیح (مثلاً «فقط 128 — [320] ناموفق: …»)
+ *   failed  → هیچ فایلی نرسیده (پست پیش‌نویس می‌ماند)؛ _bm_download_failed = زمان
+ */
+function bm_set_download_state($post_id, $state, $note = '') {
+    if ($state === 'ok') {
+        delete_post_meta($post_id, '_bm_download_failed');
+        delete_post_meta($post_id, '_bm_download_partial');
+    } elseif ($state === 'partial') {
+        delete_post_meta($post_id, '_bm_download_failed');
+        update_post_meta($post_id, '_bm_download_partial', $note !== '' ? $note : current_time('mysql'));
+    } else {
+        update_post_meta($post_id, '_bm_download_failed', current_time('mysql'));
+        delete_post_meta($post_id, '_bm_download_partial');
+    }
+}
+
+/**
+ * حدس نوع صفحه‌ی مبدأ وقتی لینک فایل آهنگ ندارد: 'آلبوم' | 'موزیک ویدیو' | 'پلی‌لیست' | ''
+ * از نامک لینک (…-album، …-video) و وجود لینک ویدیو در پاسخ API
+ */
+function bm_guess_source_kind($url, $has_video = false) {
+    $path = strtolower((string) parse_url((string) $url, PHP_URL_PATH));
+    if (preg_match('#-album(?:-\d+)?/?$#', $path)) {
+        return 'آلبوم';
+    }
+    if ($has_video || preg_match('#(?:^|[-/])(?:music-)?video(?:-\d+)?/?$#', $path)) {
+        return 'موزیک ویدیو';
+    }
+    if (strpos($path, '/playlist') !== false) {
+        return 'پلی‌لیست';
+    }
+    return '';
+}
+
+/* -------------------------------------------------------
+ |  لینک‌های داخلی بدون دامنه (مستقل از دامنه‌ی سایت)
+ |  لینک‌هایی که در متن پست ذخیره می‌شوند («دانلود آهنگ جدید» → /music/ و صفحه‌ی خواننده → /artist/…) با
+ |  $bot_relative_links = true بدون دامنه نوشته می‌شوند تا اگر روزی دامنه عوض شد (ahangban.ir → ahangban.com)
+ |  هیچ‌چیز در دیتابیس نیاز به تغییر نداشته باشد. mu-plugins/ahangban-seo.php در خروجی (صفحه، فید، REST) همین
+ |  لینک‌ها را با دامنه‌ی فعلی کامل می‌کند. پست‌های قدیمی: bot/domain-tool.php
+ |  همین توابع در domain-tool.php برای ویرایش دسته‌ای محتوا استفاده می‌شوند.
+ * ------------------------------------------------------ */
+
+/** آیا لینک‌های داخلی متن پست بدون دامنه ذخیره شوند؟ (config: $bot_relative_links، پیش‌فرض true) */
+function bm_relative_links_enabled() {
+    return !isset($GLOBALS['bot_relative_links']) || !empty($GLOBALS['bot_relative_links']);
+}
+
+/** scheme + host سایت از home_url (بدون مسیر)؛ مثل https://ahangban.ir */
+function bm_site_origin() {
+    $home = function_exists('home_url') ? (string) home_url('/') : '';
+    if ($home === '' && !empty($GLOBALS['urlsite'])) {
+        $home = (string) $GLOBALS['urlsite'];
+    }
+    return preg_match('#^(https?://[^/]+)#i', $home, $m) ? $m[1] : rtrim($home, '/');
+}
+
+/**
+ * نام‌های میزبان که «داخلی» حساب می‌شوند: میزبان home_url با و بدون www (+ میزبان‌های اضافی مثل دامنه‌های قدیمی)
+ */
+function bm_internal_hosts(array $extra = []) {
+    $hosts = [];
+    $home  = strtolower((string) parse_url(bm_site_origin(), PHP_URL_HOST));
+    foreach (array_merge([$home], $extra) as $host) {
+        $host = strtolower(trim((string) $host));
+        $host = preg_replace('#^[a-z]+://#', '', $host);
+        $host = trim((string) preg_replace('#[/?\#].*$#', '', $host), " \t\r\n/");
+        if ($host === '') {
+            continue;
+        }
+        $bare = preg_replace('#^www\.#', '', $host);
+        $hosts[$bare]          = true;
+        $hosts['www.' . $bare] = true;
+    }
+    return array_keys($hosts);
+}
+
+/* -------------------------------------------------------
+ |  هاست دانلود همراه دامنه‌ی سایت
+ |  $urldlhost خالی (پیش‌فرض) = خودکار: «dl.» + دامنه‌ی سایت بدون www (ahangban.ir → https://dl.ahangban.ir،
+ |  ahangban.com → https://dl.ahangban.com). اگر هاست دانلود جدید این قاعده را ندارد، در wp-config.php:
+ |  define('AHANGBAN_DL_HOST', 'https://files.example.com'); — همین ثابت را افزونه‌ی ahangban-seo هم می‌خواند،
+ |  پس ربات و خروجی سایت همیشه یک هاست دانلود می‌بینند. مقدار غیرخالی $urldlhost در config.php بر همه مقدم است.
+ * ------------------------------------------------------ */
+
+/** هاست دانلود پیش‌فرض (scheme + host، بدون / آخر): AHANGBAN_DL_HOST یا https://{$bot_dl_subdomain}.<دامنه‌ی سایت بدون www> */
+function bm_default_dl_origin() {
+    if (defined('AHANGBAN_DL_HOST') && trim((string) AHANGBAN_DL_HOST) !== '') {
+        $origin = trim((string) AHANGBAN_DL_HOST);
+        if (!preg_match('#^https?://#i', $origin)) {
+            $origin = 'https://' . ltrim($origin, '/');
+        }
+        return rtrim($origin, '/');
+    }
+    $site = bm_site_origin();
+    $host = strtolower((string) parse_url($site, PHP_URL_HOST));
+    if ($host === '') {
+        return '';
+    }
+    $scheme = strtolower((string) parse_url($site, PHP_URL_SCHEME)) === 'http' ? 'http' : 'https';
+    $sub    = isset($GLOBALS['bot_dl_subdomain']) ? trim((string) $GLOBALS['bot_dl_subdomain'], " .\t") : 'dl';
+    $bare   = preg_replace('#^www\.#', '', $host);
+    return $scheme . '://' . ($sub !== '' ? $sub . '.' : '') . $bare;
+}
+
+/**
+ * $urldlhost / $functions_dl_music خالی → مقدار خودکار (در همان متغیرهای سراسری config.php)
+ * $GLOBALS['bm_dl_source'] می‌گوید مقدار از کجا آمده: config | constant | auto | none
+ */
+function bm_resolve_dl_config() {
+    if (!empty($GLOBALS['urldlhost'])) {
+        $GLOBALS['bm_dl_source'] = 'config';
+    } else {
+        $origin = bm_default_dl_origin();
+        $GLOBALS['urldlhost']    = $origin;
+        $GLOBALS['bm_dl_source'] = $origin === '' ? 'none' : ((defined('AHANGBAN_DL_HOST') && trim((string) AHANGBAN_DL_HOST) !== '') ? 'constant' : 'auto');
+    }
+    if (empty($GLOBALS['functions_dl_music']) && !empty($GLOBALS['urldlhost'])) {
+        $GLOBALS['functions_dl_music'] = rtrim((string) $GLOBALS['urldlhost'], '/') . '/music.php';
+    }
+    return (string) $GLOBALS['urldlhost'];
+}
+
+/** هاست دانلود فعلی ربات (scheme + host، بدون / آخر)؛ '' = تنظیم نشده */
+function bm_dl_origin() {
+    if (!isset($GLOBALS['bm_dl_source'])) {
+        bm_resolve_dl_config();
+    }
+    return rtrim((string) $GLOBALS['urldlhost'], '/');
+}
+
+/**
+ * اجرای یک تابع روی مقدار صفت‌های لینک (href، src، poster، data-src) در یک تکه HTML؛ بقیه‌ی متن دست نمی‌خورد
+ * (متن ساده‌ای که آدرس در آن نوشته شده تغییر نمی‌کند — فقط لینک‌های واقعی)
+ */
+function bm_links_rewrite_attrs($html, callable $fn) {
+    if (!is_string($html) || $html === '') {
+        return $html;
+    }
+    return preg_replace_callback(
+        '#(\b(?:href|src|poster|data-src)\s*=\s*)(["\'])(.*?)\2#is',
+        function ($m) use ($fn) {
+            $new = $fn($m[3]);
+            return $m[1] . $m[2] . (is_string($new) ? $new : $m[3]) . $m[2];
+        },
+        $html
+    );
+}
+
+/** الگوی «آدرس مطلق روی یکی از این میزبان‌ها» (http/https/بدون پروتکل، با یا بی‌پورت) تا قبل از مسیر */
+function bm_hosts_pattern(array $hosts) {
+    $quoted = [];
+    foreach ($hosts as $host) {
+        $host = strtolower(trim((string) $host));
+        if ($host !== '') {
+            $quoted[] = preg_quote($host, '#');
+        }
+    }
+    if (empty($quoted)) {
+        return '';
+    }
+    return '#^\s*(?:https?:)?//(?:' . implode('|', $quoted) . ')(?::\d+)?(?=[/?\#]|\s*$)#i';
+}
+
+/** یک آدرس مطلق داخلی → بدون دامنه (/music/)؛ آدرس‌های دیگر (خارجی، mailto، #، نسبی) همان‌طور برمی‌گردد */
+function bm_url_make_relative($url, array $hosts) {
+    $pattern = bm_hosts_pattern($hosts);
+    if ($pattern === '' || !preg_match($pattern, (string) $url)) {
+        return $url;
+    }
+    $rest = trim((string) preg_replace($pattern, '', (string) $url));
+    if ($rest === '' || $rest[0] !== '/') {
+        $rest = '/' . $rest; // «https://site» → «/»، «https://site?x» → «/?x»
+    }
+    return $rest;
+}
+
+/** لینک داخلی ساخته‌شده توسط خود ربات (get_term_link، لینک دسته و …) → بدون دامنه، اگر $bot_relative_links روشن باشد */
+function bm_relative_url($url) {
+    $url = (string) $url;
+    if ($url === '' || !bm_relative_links_enabled()) {
+        return $url;
+    }
+    return bm_url_make_relative($url, bm_internal_hosts());
+}
+
+/**
+ * عکس عمل بالا برای یک آدرس: بدون دامنه (/music/) → مطلق با $origin (مثل https://ahangban.ir)
+ * «//cdn…» (بدون پروتکل)، «/\…» و آدرس‌های دیگر دست نمی‌خورند.
+ */
+function bm_url_make_absolute($url, $origin) {
+    $origin = rtrim((string) $origin, '/');
+    if ($origin === '' || !preg_match('#^/(?![/\\\\])#', (string) $url)) {
+        return $url;
+    }
+    return $origin . $url;
+}
+
+/** تعویض میزبان یک آدرس مطلق: اگر روی یکی از $old_hosts بود → همان مسیر روی $new_origin (مثل https://dl.ahangban.com) */
+function bm_url_swap_host($url, array $old_hosts, $new_origin) {
+    $pattern    = bm_hosts_pattern($old_hosts);
+    $new_origin = rtrim((string) $new_origin, '/');
+    if ($pattern === '' || $new_origin === '' || !preg_match($pattern, (string) $url)) {
+        return $url;
+    }
+    $rest = trim((string) preg_replace($pattern, '', (string) $url));
+    if ($rest !== '' && $rest[0] !== '/') {
+        $rest = '/' . $rest;
+    }
+    return $new_origin . $rest;
+}
+
+/**
+ * اجرای یکی از سه عمل بالا روی همه‌ی لینک‌های یک HTML
+ *   $op = 'relative' (hosts → بدون دامنه) | 'absolute' (origin) | 'swap' (hosts + origin)
+ * خروجی: ['html' => متن جدید, 'changed' => تعداد لینک‌های عوض‌شده, 'pairs' => [[قبل, بعد], …] (حداکثر $max_pairs نمونه)]
+ */
+function bm_links_transform($html, $op, array $hosts = [], $origin = '', $max_pairs = 0) {
+    $changed = 0;
+    $pairs   = [];
+    $out     = bm_links_rewrite_attrs($html, function ($url) use ($op, $hosts, $origin, $max_pairs, &$changed, &$pairs) {
+        if ($op === 'relative') {
+            $new = bm_url_make_relative($url, $hosts);
+        } elseif ($op === 'absolute') {
+            $new = bm_url_make_absolute($url, $origin);
+        } elseif ($op === 'swap') {
+            $new = bm_url_swap_host($url, $hosts, $origin);
+        } else {
+            $new = $url;
+        }
+        if ($new !== $url) {
+            $changed++;
+            if (count($pairs) < $max_pairs) {
+                $pairs[] = [$url, $new];
+            }
+        }
+        return $new;
+    });
+    return ['html' => $out, 'changed' => $changed, 'pairs' => $pairs];
+}
+
+/** همه‌ی لینک‌های داخلی مطلق یک HTML → بدون دامنه. خروجی: ['html', 'changed', 'pairs'] */
+function bm_links_make_relative($html, array $hosts) {
+    return bm_links_transform($html, 'relative', $hosts);
+}
+
+/** لینک‌های بدون دامنه‌ی یک HTML → مطلق با $origin */
+function bm_links_make_absolute($html, $origin) {
+    return bm_links_transform($html, 'absolute', [], $origin);
+}
+
+/** تعویض میزبان همه‌ی لینک‌های مطلق یک HTML که روی $old_hosts هستند → $new_origin */
+function bm_links_swap_host($html, array $old_hosts, $new_origin) {
+    return bm_links_transform($html, 'swap', $old_hosts, $new_origin);
+}
+
+/**
  * اگر term وجود نداشت بساز و سپس روی پست ست کن
  */
 function bm_set_term_if_not_empty($post_id, $value, $taxonomy, $append = false) {
@@ -748,8 +1165,13 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
     };
     add_filter('wp_unique_filename', $force_exact_name, 10, 4);
 
+    // سایزهای نمایشی (thumb1 … thumb4، thumb2x، medium، …) با WebP ساخته می‌شوند؛ خود فایل اصلی همان‌طور که هست
+    // آپلود می‌شود و «full» می‌ماند تا با کیفیت کامل قابل باز کردن باشد (bot/webp.php)
+    $webp = bm_webp_begin($desired_name);
+
     $attachment_id = media_handle_sideload($file_array, $post_id, $desc);
 
+    bm_webp_end($webp);
     remove_filter('wp_unique_filename', $force_exact_name, 10);
 
     if (is_wp_error($attachment_id)) {
@@ -800,17 +1222,21 @@ function bm_upload_featured_image_from_url($image_url, $post_id, $img_name = '',
         ];
     }
 
-    // اندازه‌ی نهایی برای گزارش
-    $meta = wp_get_attachment_metadata($attachment_id);
-    $dims = (!empty($meta['width']) && !empty($meta['height']))
+    // اندازه‌ی نهایی و وضعیت WebP سایزها برای گزارش
+    $meta      = wp_get_attachment_metadata($attachment_id);
+    $dims      = (!empty($meta['width']) && !empty($meta['height']))
         ? ' (' . (int) $meta['width'] . '×' . (int) $meta['height'] . ')'
         : '';
+    $webp_note = bm_webp_describe($meta, $webp);
 
     return [
         'success'   => true,
-        'message'   => 'تصویر شاخص با موفقیت ثبت شد' . $dims . '.' . ($watermark['note'] !== '' ? ' ' . $watermark['note'] . '.' : ''),
+        'message'   => 'تصویر شاخص با موفقیت ثبت شد' . $dims . '.'
+            . ($watermark['note'] !== '' ? ' ' . $watermark['note'] . '.' : '')
+            . ($webp_note !== '' ? ' ' . $webp_note . '.' : ''),
         'id'        => $attachment_id,
         'watermark' => $watermark['note'],
+        'webp'      => $webp_note,
     ];
 }
 
@@ -914,6 +1340,58 @@ function bm_post_id_by_title($title) {
          ORDER BY ID ASC LIMIT 1",
         $title
     ));
+}
+
+/**
+ * الگوی عنوان پست ($bot_title_template در config.php؛ جایگزین‌ها {song} و {artist})
+ * پیش‌فرض «دانلود آهنگ {song} از {artist}» — همان ترتیبی که جستجو می‌شود و قالب در تیترهای پست می‌نویسد
+ */
+function bm_title_template() {
+    global $bot_title_template;
+    $template = isset($bot_title_template) ? trim((string) $bot_title_template) : '';
+    return ($template !== '' && strpos($template, '{song}') !== false) ? $template : 'دانلود آهنگ {song} از {artist}';
+}
+
+/** پر کردن الگوی عنوان با نام خواننده و آهنگ؛ فاصله‌های تکراری یکی می‌شود */
+function bm_fill_title($template, $artist, $song) {
+    $title = strtr((string) $template, ['{artist}' => (string) $artist, '{song}' => (string) $song]);
+    return trim((string) preg_replace('/\s+/u', ' ', $title));
+}
+
+/** عنوان پستی که ربات برای این آهنگ می‌سازد (عنوان پست، عنوان متا و کلمه‌ی کانونی اصلی) */
+function bm_post_title($artist, $song) {
+    return bm_fill_title(bm_title_template(), $artist, $song);
+}
+
+/**
+ * همه‌ی عنوان‌های ممکن این آهنگ: الگوی فعلی + الگوهای قدیمی ($bot_title_legacy در config.php)
+ * پست‌های قدیمی سایت با «دانلود آهنگ {artist} {song}» ساخته شده‌اند؛ تشخیص پست تکراری باید آن‌ها را هم ببیند
+ */
+function bm_title_variants($artist, $song) {
+    global $bot_title_legacy;
+    $templates = array_merge(
+        [bm_title_template()],
+        isset($bot_title_legacy) ? array_values((array) $bot_title_legacy) : ['دانلود آهنگ {artist} {song}']
+    );
+    $titles = [];
+    foreach ($templates as $template) {
+        $title = bm_fill_title($template, $artist, $song);
+        if ($title !== '' && !in_array($title, $titles, true)) {
+            $titles[] = $title;
+        }
+    }
+    return $titles;
+}
+
+/** شناسه‌ی پستی که عنوانش با الگوی فعلی یا یکی از الگوهای قدیمی این آهنگ یکی است، یا 0 */
+function bm_post_id_by_song_title($artist, $song) {
+    foreach (bm_title_variants($artist, $song) as $title) {
+        $post_id = bm_post_id_by_title($title);
+        if ($post_id) {
+            return $post_id;
+        }
+    }
+    return 0;
 }
 
 /** شناسه‌ی پستی که از همین لینک مبدأ ساخته شده (متای _bm_source_url) یا 0 */
@@ -1155,10 +1633,10 @@ function bm_build_post_content($args = []) {
     // چند هنرمند: [['name' => نام, 'link' => لینک آرشیو], ...] (خروجی bm_get_artist_terms)
     $artists     = (isset($args['artists']) && is_array($args['artists'])) ? $args['artists'] : [];
 
-    // لینک آهنگ جدید
+    // لینک آهنگ جدید (بدون دامنه: /music/ — بخش «لینک‌های داخلی بدون دامنه»)
     $music_html = '<strong>دانلود آهنگ جدید</strong>';
     if ($music_url !== '') {
-        $music_html = '<a href="' . esc_url($music_url) . '">' . $music_html . '</a>';
+        $music_html = '<a href="' . esc_url(bm_relative_url($music_url)) . '">' . $music_html . '</a>';
     }
 
     // لینک خواننده (هر هنرمند به صفحه‌ی خودش؛ با « و » کنار هم)
@@ -1173,7 +1651,7 @@ function bm_build_post_content($args = []) {
         }
         $one_html = '<strong>' . esc_html($name) . '</strong>';
         if (!empty($one['link'])) {
-            $one_html = '<a class="ty-singer-link" href="' . esc_url($one['link']) . '">' . $one_html . '</a>';
+            $one_html = '<a class="ty-singer-link" href="' . esc_url(bm_relative_url($one['link'])) . '">' . $one_html . '</a>';
         }
         $singer_parts[] = $one_html;
     }
@@ -1247,6 +1725,20 @@ if ($artist === '' || $song === '') {
     exit('خطا: نام خواننده یا نام آهنگ از API دریافت نشد.' . bm_result_marker('error', ['reason' => 'api', 'message' => 'نام خواننده یا نام آهنگ از API دریافت نشد']));
 }
 
+// صفحه‌ی مبدأ باید دست‌کم یک لینک فایل آهنگ (320 یا 128) داشته باشد. صفحه‌ی آلبوم، موزیک ویدیو یا پلی‌لیست لینک تک‌آهنگ
+// ندارد و ساختن پست برای آن فقط یک پیش‌نویس بی‌فایده با خطای «no music url was sent» روی هاست دانلود می‌سازد.
+// ربات فقط تک‌آهنگ ثبت می‌کند؛ آلبوم و ویدیو را با پست‌ساز بفرستید. (قبل از ساختن پست متوقف می‌شود؛ چیزی ثبت نمی‌شود.)
+if ($music320 === '' && $music128 === '') {
+    $bm_nofile_kind = bm_guess_source_kind($postUrl, $video_low !== '' || $video_med !== '');
+    $bm_nofile_msg  = 'در صفحه‌ی مبدأ لینک فایل آهنگ (320/128) پیدا نشد'
+        . ($bm_nofile_kind !== '' ? ' — این صفحه ' . $bm_nofile_kind . ' است' : '')
+        . '؛ ربات فقط تک‌آهنگ ثبت می‌کند (آلبوم/ویدیو را با پست‌ساز بفرستید)';
+    if (isset($GLOBALS['bm_auto_job']) && is_array($GLOBALS['bm_auto_job'])) {
+        $GLOBALS['bm_auto_job']['skipped'] = $bm_nofile_msg; // auto.php: این آیتم «رد شد» ثبت می‌شود و دیگر تکرار نمی‌شود
+    }
+    exit('خطا: ' . $bm_nofile_msg . bm_result_marker('error', ['reason' => 'nofile', 'message' => $bm_nofile_msg]));
+}
+
 if ($artist_en === '') {
     $artist_en = $artist;
 }
@@ -1260,7 +1752,7 @@ if ($song_en === '') {
  |  الف) همین لینک مبدأ قبلاً ثبت شده (متای _bm_source_url) → همیشه رد می‌شود
  |  ب) عنوان یکسان ولی لینک مبدأ دیگر (قطعه‌ی دیگری با نام عمومی مثل «ساز و آواز» یا «ربنا»):
  |     اگر $bm_same_title = 'number' باشد (ارسال دستی/آرشیو با گزینه‌ی «ثبت با شماره») با شماره‌ی تمایز
- |     ثبت می‌شود: «ساز و آواز (2)» و نام فایل «… - Saz o Avaz 2 [320].mp3»؛ وگرنه (پیش‌فرض و ارسال
+ |     ثبت می‌شود: «ساز و آواز (2)» و نام فایل «… - Saz o Avaz 2.mp3»؛ وگرنه (پیش‌فرض و ارسال
  |     خودکار) رد می‌شود. پست‌های قدیمی که لینک مبدأ ندارند فقط با عنوان مقایسه می‌شوند.
  * ------------------------------------------------------ */
 $bm_same_title_note = '';
@@ -1287,15 +1779,17 @@ if ($source_exists) {
         . bm_result_marker('exists', ['reason' => 'source', 'post_id' => $source_exists, 'link' => get_permalink($source_exists), 'message' => 'همین لینک قبلاً ثبت شده (ID ' . $source_exists . ')']));
 }
 
-$title_exists = bm_post_id_by_title(trim("دانلود آهنگ {$artist} {$song}"));
+// عنوان تکراری: با الگوی فعلی («دانلود آهنگ {song} از {artist}») و الگوهای قدیمی («دانلود آهنگ {artist} {song}»)
+// مقایسه می‌شود تا آهنگی که قبلاً با عنوان قدیمی ثبت شده دوباره ساخته نشود
+$title_exists = bm_post_id_by_song_title($artist, $song);
 if ($title_exists) {
     if ($same_title_mode !== 'number') {
-        exit('پست با این عنوان قبلاً ثبت شده است. ID: ' . intval($title_exists)
+        exit('پست با این عنوان قبلاً ثبت شده است. ID: ' . intval($title_exists) . ' («' . get_the_title($title_exists) . '»)'
             . ' — اگر قطعه‌ی دیگری با همین نام است، با گزینه‌ی «ثبت با شماره» دوباره بفرستید.'
-            . bm_result_marker('exists', ['reason' => 'title', 'post_id' => $title_exists, 'link' => get_permalink($title_exists), 'message' => 'پستی با همین عنوان هست (ID ' . $title_exists . ')']));
+            . bm_result_marker('exists', ['reason' => 'title', 'post_id' => $title_exists, 'link' => get_permalink($title_exists), 'message' => 'پستی با همین عنوان هست (ID ' . $title_exists . ': ' . get_the_title($title_exists) . ')']));
     }
     $same_n = 2;
-    while ($same_n < 100 && bm_post_id_by_title(trim("دانلود آهنگ {$artist} {$song} ({$same_n})"))) {
+    while ($same_n < 100 && bm_post_id_by_song_title($artist, "{$song} ({$same_n})")) {
         $same_n++;
     }
     $song    .= " ({$same_n})";
@@ -1306,24 +1800,22 @@ if ($title_exists) {
 /* -------------------------------------------------------
  |  4) ساخت نام‌ها و متن‌ها
  * ------------------------------------------------------ */
-$mytitle     = trim("دانلود آهنگ {$artist} {$song}");
+$mytitle     = bm_post_title($artist, $song); // «دانلود آهنگ {song} از {artist}» — $bot_title_template در config.php
 $post_name   = trim("{$artist_en} {$song_en}");
-$description = trim("دانلود آهنگ {$artist} {$song}");
+$description = $mytitle;
 $alt         = trim("آهنگ {$artist} {$song}");
 
 $mp3_name = bm_dl_file_name("{$artist_en} - {$song_en}");
 $imgname  = bm_safe_file_name("{$artist_en} {$song_en}");
 
-$post_cover = trailingslashit($urlsite) . "wp-content/uploads/{$dir_wp}/{$imgname}.jpg";
-
 /* -------------------------------------------------------
  |  4-1) مسیر و نام فایل‌ها روی هاست دانلود
  |  پوشه:  {نوع محتوا}/{حرف اول}/{نامک خواننده}   مثال: music/m/mohsen-yeganeh
- |  فایل:  Artist - Song [320].mp3  و  Artist - Song [128].mp3
+ |  فایل:  Artist - Song.mp3  (کیفیت 320، بدون پسوند)  و  Artist - Song [128].mp3   — bm_music_file_name
  * ------------------------------------------------------ */
 $dl_dir       = bm_download_dir($content_type, $artist_en);
-$mp3_file_320 = "{$mp3_name} [320].mp3";
-$mp3_file_128 = "{$mp3_name} [128].mp3";
+$mp3_file_320 = bm_music_file_name($mp3_name, '320');
+$mp3_file_128 = bm_music_file_name($mp3_name, '128');
 
 /* -------------------------------------------------------
  |  5) جلوگیری از پست تکراری → به بخش 3-1 منتقل شد (قبل از ساخت نام‌ها)
@@ -1358,7 +1850,7 @@ $my_post_content = bm_build_post_content([
     'song'        => $song,
     'artist_en'   => $artist_en,
     'song_en'     => $song_en,
-    'music_url'   => trailingslashit($urlsite) . 'music/',
+    'music_url'   => trailingslashit($urlsite) . 'music/', // در متن پست بدون دامنه ذخیره می‌شود: /music/
     'artists'     => $artist_terms['artists'],
 ]);
 
@@ -1400,14 +1892,14 @@ if (is_wp_error($post_id) || !$post_id) {
 update_post_meta($post_id, '_bm_source_url', esc_url_raw($postUrl));
 
 /* -------------------------------------------------------
- |  8) سئو (Yoast)
+ |  8) سئو (Rank Math / Yoast) — عنوان متا = عنوان پست («دانلود آهنگ {song} از {artist}»)
  * ------------------------------------------------------ */
 $wpseo_title     = $mytitle;
 $wpseo_metadesc  = "دانلود آهنگ جدید {$artist} به نام {$song} با کیفیت 320 و 128، پخش آنلاین" . ($matnmusic !== '' ? ' و متن ترانه' : '');
 
 // کلمه کانونی اصلی = همان عبارتی که کاربر جستجو می‌کند؛ کلمات بعدی (با کاما) کلمات کانونی فرعی Rank Math هستند
 $focus_keywords = array_values(array_unique(array_filter([
-    "دانلود آهنگ {$artist} {$song}",
+    $mytitle,
     "{$artist} {$song}",
     ($artist_en !== $artist || $song_en !== $song) ? "{$artist_en} {$song_en}" : '',
 ])));
@@ -1484,10 +1976,12 @@ if (!empty($urldlhost)) {
  |  11) ذخیره متاهای موزیک
  * ------------------------------------------------------ */
 
-// اگر فایل روی هاست خودت دانلود می‌شود، معمولاً بهتر است لینک‌های نهایی هاست خودت را ذخیره کنی.
-// ولی اگر خواستی مستقیم لینک API ذخیره شود، این منطق را عوض کن.
-$final_music320 = !empty($path_320) ? $path_320 : $music320;
-$final_music128 = !empty($path_128) ? $path_128 : $music128;
+// لینک نهایی هاست دانلود خودت ذخیره می‌شود (اگر $urldlhost خالی باشد، لینک مبدأ).
+// فقط کیفیتی که مبدأ دارد متا می‌گیرد (همان قاعده‌ی پست‌ساز و اسکریپت اصلی قالب): اگر مبدأ فقط 128 دارد، music320 نوشته
+// نمی‌شود تا دکمه‌ی 320 به فایلی که هیچ‌وقت ساخته نمی‌شود (404) اشاره نکند؛ در نبودِ 128، music128/online به فایل 320 وصل می‌شود.
+// بعد از انتقال (بخش ۱۳) اگر یکی از دو فایل نرسیده باشد، bm_sync_music_metas() متاها را با فایل‌های واقعی هماهنگ می‌کند.
+$final_music320 = $music320 !== '' ? (!empty($path_320) ? $path_320 : $music320) : '';
+$final_music128 = $music128 !== '' ? (!empty($path_128) ? $path_128 : $music128) : '';
 
 // کیفیت‌ها
 if (!empty($final_music320)) {
@@ -1565,6 +2059,10 @@ update_post_meta($post_id, '_bm_featured_image_result', maybe_serialize($image_r
  * ------------------------------------------------------ */
 $download_response = null;
 $download_info     = null;
+$download_usable   = null;  // null = انتقالی انجام نشد؛ true = دست‌کم یک کیفیت روی هاست دانلود نشست (پست قابل انتشار است)
+$download_partial  = false; // فقط یکی از دو کیفیت رسید (مثلاً لینک 320 مبدأ خراب بود) — پست با همان یکی منتشر می‌شود
+$download_label    = '';    // «هر دو کیفیت» / «فقط 128» / «فقط 320»
+$download_changes  = [];    // تغییر متاها بعد از انتقال ناقص (برای گزارش)
 
 // لینک‌های مبدأ روی پست می‌ماند تا اگر انتقال ناموفق شد، bot/dl-repair.php بدون نیاز دوباره به API آن را تکرار کند
 update_post_meta($post_id, '_bm_media_urls', wp_json_encode([
@@ -1585,15 +2083,34 @@ if (!empty($functions_dl_music)) {
         'file_320'  => $mp3_file_320,
         'file_128'  => $mp3_file_128,
         'dir_file'  => $dl_dir, // مثال: music/m/mohsen-yeganeh
+        'lyrics'    => bm_lyrics_plain($matnmusic), // متن ترانه داخل تگ ID3 فایل‌ها (hostdl/music.php)
     ], 300, $dl_userpwd);
     $download_info = bm_dl_response_info($download_response);
 
     // برای بررسی لاگ
     update_post_meta($post_id, '_bm_download_response', maybe_serialize($download_response));
+
+    // نتیجه به تفکیک کیفیت (music.php نسخه‌ی ۲): اگر فقط یکی از دو فایل رسید، همان کافی است — لینک کیفیت نرسیده از پست
+    // برداشته می‌شود و پست با کیفیت موجود منتشر می‌شود (به‌جای این‌که به‌خاطر یک لینک خراب در مبدأ پیش‌نویس بماند).
+    $download_usable = (bool) $download_info['ok'];
+    $download_landed = bm_dl_landed($download_info);
+    if (is_array($download_landed) && !empty($urldlhost) && !$download_info['ok']) {
+        $download_have = ['320' => $download_landed['320'] === true, '128' => $download_landed['128'] === true];
+        if ($download_have['320'] || $download_have['128']) {
+            $download_sync    = bm_sync_music_metas($post_id, $download_have, ['320' => $path_320, '128' => $path_128]);
+            $download_usable  = $download_sync['usable'];
+            $download_partial = $download_sync['usable'];
+            $download_label   = $download_sync['label'];
+            $download_changes = $download_sync['changes'];
+        }
+    }
+
     if ($download_info['ok']) {
-        delete_post_meta($post_id, '_bm_download_failed');
+        bm_set_download_state($post_id, 'ok');
+    } elseif ($download_partial) {
+        bm_set_download_state($post_id, 'partial', $download_label . ' — ' . $download_info['summary']);
     } else {
-        update_post_meta($post_id, '_bm_download_failed', current_time('mysql'));
+        bm_set_download_state($post_id, 'failed');
     }
 }
 
@@ -1602,14 +2119,15 @@ if (!empty($functions_dl_music)) {
  |  تا این‌جا پست پیش‌نویس بود؛ حالا که همه چیز آماده است منتشر می‌شود. این همان اتفاقی است که با
  |  زدن «به‌روزرسانی» در پیشخوان می‌افتد: هوک‌های save_post / publish_post قالب و افزونه‌ها
  |  (کش، پلیر صفحه‌ی اصلی، ارسال تلگرام، نقشه‌ی سایت و ...) پست را کامل می‌بینند.
- |  اگر فایل‌ها به هاست دانلود نرسیده باشند و $bot_publish_without_files خاموش باشد، پست پیش‌نویس می‌ماند
+ |  اگر هیچ فایلی به هاست دانلود نرسیده باشد و $bot_publish_without_files خاموش باشد، پست پیش‌نویس می‌ماند
  |  (لینک دانلود خراب منتشر نمی‌شود)؛ با bot/dl-repair.php انتقال تکرار و پست منتشر می‌شود.
+ |  اگر دست‌کم یکی از دو کیفیت رسیده باشد، پست با همان منتشر می‌شود (متاها در بخش ۱۳ هماهنگ شده‌اند).
  * ------------------------------------------------------ */
 $post_published = false;
 $publish_error  = '';
 
-if (is_array($download_info) && !$download_info['ok'] && empty($bot_publish_without_files)) {
-    $publish_error = 'فایل‌ها به هاست دانلود منتقل نشدند؛ پست پیش‌نویس ماند (بعد از رفع مشکل از bot/dl-repair.php دوباره بفرستید)';
+if (is_array($download_info) && !$download_usable && empty($bot_publish_without_files)) {
+    $publish_error = 'هیچ فایلی به هاست دانلود منتقل نشد؛ پست پیش‌نویس ماند (بعد از رفع مشکل از bot/dl-repair.php دوباره بفرستید)';
 } else {
     $publish_result = wp_update_post([
         'ID'          => $post_id,
@@ -1659,8 +2177,15 @@ if ($artist_taxonomy === '') {
 
 if (is_array($download_info)) {
     echo 'پوشه هاست دانلود: ' . esc_html($dl_dir) . '<br>';
-    echo 'دانلود موزیک: ' . ($download_info['ok'] ? 'انجام شد' : 'ناموفق') . ($download_info['ok'] && $download_info['summary'] !== '' ? ' — ' . esc_html($download_info['summary']) : '') . '<br>';
-    if (!$download_info['ok']) {
+    if ($download_info['ok']) {
+        echo 'دانلود موزیک: انجام شد' . ($download_info['summary'] !== '' ? ' — ' . esc_html($download_info['summary']) : '') . '<br>';
+    } elseif ($download_partial) {
+        echo 'دانلود موزیک: ناقص — ' . esc_html($download_label) . ' روی هاست دانلود نشست و پست با همان منتشر شد — ' . esc_html($download_info['summary']) . '<br>';
+        foreach ($download_changes as $download_change) {
+            echo '&nbsp;&nbsp;— ' . esc_html($download_change) . '<br>';
+        }
+    } else {
+        echo 'دانلود موزیک: ناموفق<br>';
         echo 'خطای دانلود موزیک: ' . esc_html($download_info['summary']) . '<br>';
     }
 }
@@ -1671,7 +2196,8 @@ echo bm_result_marker('ok', [
     'link'      => get_permalink($post_id),
     'title'     => $mytitle,
     'published' => $post_published,
-    'download'  => is_array($download_info) ? (bool) $download_info['ok'] : null,
-    'download_error' => is_array($download_info) && !$download_info['ok'] ? $download_info['summary'] : '',
+    'download'  => is_array($download_info) ? (bool) $download_usable : null,
+    'download_error' => is_array($download_info) && !$download_usable ? $download_info['summary'] : '',
+    'download_note'  => $download_partial ? 'انتقال ناقص: ' . $download_label . ' روی هاست دانلود نشست و پست با همان منتشر شد — ' . $download_info['summary'] : '',
     'note'      => trim($bm_same_title_note . ($bm_artist_note !== '' ? ($bm_same_title_note !== '' ? '؛ ' : '') . $bm_artist_note : '')),
 ]);

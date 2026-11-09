@@ -1,7 +1,8 @@
 <?php
 /**
  * پست‌ساز آهنگ‌بان — پنل ثبت دستی
- *   تک‌آهنگ (آهنگ / ریمیکس / مداحی / پادکست) ، موزیک ویدیو ، آلبوم ، آپلود فایل روی هاست دانلود
+ *   تک‌آهنگ (آهنگ / مداحی / پادکست) ، تب‌های جداگانه‌ی تک‌آهنگ («آهنگ ترند»، «ریمیکس» — نوع‌هایی که در
+ *   postsaz/config.php کلید tab دارند) ، موزیک ویدیو ، آلبوم ، آپلود فایل روی هاست دانلود
  *
  * ورود با همان یوزر/رمز ربات (HTTP Basic Auth). فرم‌ها به submit.php ارسال می‌شوند.
  */
@@ -15,7 +16,8 @@ require_once __DIR__ . '/../wp-load.php';
 require_once __DIR__ . '/engine.php';
 require_once __DIR__ . '/ui.php';
 
-$types_single = ps_types('single');
+$single_tabs  = ps_single_tabs(); // ['single' => نوع‌های تب تک‌آهنگ, 'trend' => [...], …]
+$first_tab    = !empty($single_tabs) ? (string) key($single_tabs) : 'single'; // تب فعال اول (معمولاً «تک‌آهنگ»)
 $type_video   = ps_module_type('video');
 $type_album   = ps_module_type('album');
 $extra_cats   = array_map('intval', (array) ps_cfg('extra_categories', []));
@@ -33,47 +35,32 @@ foreach (ps_types() as $key => $type) {
     )));
 }
 
-$first_single = !empty($types_single) ? reset($types_single) : null;
-$single_options = [];
-foreach ($types_single as $key => $type) {
-    $single_options[$key] = $type['label'];
-}
-
-// آخرین پست‌های ساخته‌شده با پست‌ساز
-$recent = get_posts([
-    'post_type'      => 'post',
-    'post_status'    => ['publish', 'draft', 'pending', 'future'],
-    'posts_per_page' => 8,
-    'meta_key'       => '_postsaz_type',
-    'orderby'        => 'date',
-    'order'          => 'DESC',
-]);
-
-ps_ui_header('پست جدید');
-?>
-
-<nav class="ps-tabs" role="tablist">
-    <a href="#single" class="ps-tab is-active" data-tab="single">تک‌آهنگ</a>
-    <a href="#video" class="ps-tab" data-tab="video">موزیک ویدیو</a>
-    <a href="#album" class="ps-tab" data-tab="album">آلبوم</a>
-    <a href="#leech" class="ps-tab" data-tab="leech">آپلود فایل</a>
-</nav>
-
-<?php if ($limit_text !== '') : ?>
-<p class="ps-note"><?php echo ps_h($limit_text); ?></p>
-<?php endif; ?>
-
-<!-- ============================ تک‌آهنگ ============================ -->
-<section id="panel-single" class="ps-panel is-active" data-panel="single">
-<?php if (!$first_single) : ?>
-    <p class="ps-alert">هیچ نوعی با module = single در postsaz/config.php تعریف نشده است.</p>
-<?php else : ?>
+/**
+ * فرم تک‌آهنگ برای یک تب: تب «تک‌آهنگ» با فهرست «نوع اثر»، تب‌های جداگانه (مثل «آهنگ ترند») با نوع ثابت و یک خط راهنما
+ */
+function ps_ui_single_form($tab, array $types, array $defaults_map, array $categories) {
+    $first   = reset($types);
+    $options = [];
+    foreach ($types as $key => $type) {
+        $options[$key] = $type['label'];
+    }
+    $fixed  = ($tab !== 'single' && count($types) === 1);
+    $button = $tab === 'single' ? 'ثبت تک‌آهنگ' : 'ثبت ' . $first['label'];
+    ?>
+    <?php if ($tab !== 'single' && !empty($first['note'])) : ?>
+    <p class="ps-note"><?php echo ps_h($first['note']); ?></p>
+    <?php endif; ?>
     <form method="post" action="submit.php" enctype="multipart/form-data" class="ps-form" data-defaults='<?php echo ps_h(wp_json_encode($defaults_map)); ?>'>
         <input type="hidden" name="module" value="single">
         <?php wp_nonce_field('postsaz_submit', 'ps_nonce'); ?>
 
         <div class="ps-grid">
-            <?php ps_ui_select('type', 'نوع اثر', $single_options, $first_single['key'], ['attrs' => 'data-type-select']); ?>
+            <?php if ($fixed) : ?>
+                <input type="hidden" name="type" value="<?php echo ps_h($first['key']); ?>">
+                <div class="ps-field"><span class="ps-label">نوع اثر</span><strong class="ps-fixed"><?php echo ps_h($first['label']); ?></strong></div>
+            <?php else : ?>
+                <?php ps_ui_select('type', 'نوع اثر', $options, $first['key'], ['attrs' => 'data-type-select']); ?>
+            <?php endif; ?>
             <?php ps_ui_status('publish'); ?>
             <?php ps_ui_text('artist', 'نام خواننده (فارسی)', ['required' => true, 'placeholder' => 'محسن یگانه — برای چند نفر: «الف و ب»']); ?>
             <?php ps_ui_text('song', 'نام اثر (فارسی)', ['required' => true, 'placeholder' => 'سرنوشت']); ?>
@@ -82,7 +69,7 @@ ps_ui_header('پست جدید');
         </div>
 
         <div class="ps-grid">
-            <?php ps_ui_media('cover', 'کاور', 'image/jpeg,image/png,image/webp', ['hint' => 'ترجیحاً مربعی و دست‌کم 500×500؛ به مربع حداکثر ' . (int) (isset($bot_cover_size) ? $bot_cover_size : 1080) . ' برش می‌خورد']); ?>
+            <?php ps_ui_media('cover', 'کاور', 'image/jpeg,image/png,image/webp', ['hint' => 'ترجیحاً مربعی و دست‌کم 500×500؛ به مربع حداکثر ' . (int) (isset($GLOBALS['bot_cover_size']) ? $GLOBALS['bot_cover_size'] : 1080) . ' برش می‌خورد']); ?>
             <?php ps_ui_media('music320', 'فایل MP3 کیفیت 320', 'audio/mpeg,.mp3'); ?>
             <?php ps_ui_media('music128', 'فایل MP3 کیفیت 128', 'audio/mpeg,.mp3', ['hint' => 'اگر فقط 320 بدهید، لینک 128 و پخش آنلاین هم به همان فایل اشاره می‌کند']); ?>
         </div>
@@ -103,16 +90,54 @@ ps_ui_header('پست جدید');
             </div>
         </details>
 
-        <?php ps_ui_categories($categories, $defaults_map[$first_single['key']]); ?>
+        <?php ps_ui_categories($categories, isset($defaults_map[$first['key']]) ? $defaults_map[$first['key']] : []); ?>
         <?php ps_ui_post_options(); ?>
 
         <div class="ps-actions">
-            <button type="submit" class="ps-btn">ثبت تک‌آهنگ</button>
+            <button type="submit" class="ps-btn"><?php echo ps_h($button); ?></button>
             <span class="ps-progress" hidden>در حال ارسال و انتقال فایل‌ها… این صفحه را نبندید.</span>
         </div>
     </form>
+    <?php
+}
+
+// آخرین پست‌های ساخته‌شده با پست‌ساز
+$recent = get_posts([
+    'post_type'      => 'post',
+    'post_status'    => ['publish', 'draft', 'pending', 'future'],
+    'posts_per_page' => 8,
+    'meta_key'       => '_postsaz_type',
+    'orderby'        => 'date',
+    'order'          => 'DESC',
+]);
+
+ps_ui_header('پست جدید');
+?>
+
+<nav class="ps-tabs" role="tablist">
+    <?php foreach ($single_tabs as $tab => $tab_types) : $tab_first = reset($tab_types); ?>
+    <a href="#<?php echo ps_h($tab); ?>" class="ps-tab<?php echo $tab === $first_tab ? ' is-active' : ''; ?>" data-tab="<?php echo ps_h($tab); ?>"><?php echo ps_h($tab === 'single' ? 'تک‌آهنگ' : $tab_first['label']); ?></a>
+    <?php endforeach; ?>
+    <a href="#video" class="ps-tab" data-tab="video">موزیک ویدیو</a>
+    <a href="#album" class="ps-tab" data-tab="album">آلبوم</a>
+    <a href="#leech" class="ps-tab" data-tab="leech">آپلود فایل</a>
+</nav>
+
+<?php if ($limit_text !== '') : ?>
+<p class="ps-note"><?php echo ps_h($limit_text); ?></p>
 <?php endif; ?>
+
+<!-- ============================ تک‌آهنگ + تب‌های جداگانه‌ی تک‌آهنگ (مثل آهنگ ترند) ============================ -->
+<?php if (empty($single_tabs)) : ?>
+<section id="panel-single" class="ps-panel is-active" data-panel="single">
+    <p class="ps-alert">هیچ نوعی با module = single در postsaz/config.php تعریف نشده است.</p>
 </section>
+<?php endif; ?>
+<?php foreach ($single_tabs as $tab => $tab_types) : ?>
+<section id="panel-<?php echo ps_h($tab); ?>" class="ps-panel<?php echo $tab === $first_tab ? ' is-active' : ''; ?>" data-panel="<?php echo ps_h($tab); ?>">
+    <?php ps_ui_single_form($tab, $tab_types, $defaults_map, $categories); ?>
+</section>
+<?php endforeach; ?>
 
 <!-- ============================ موزیک ویدیو ============================ -->
 <section id="panel-video" class="ps-panel" data-panel="video">

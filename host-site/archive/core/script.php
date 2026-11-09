@@ -54,10 +54,15 @@ if ($p === '' || !filter_var($p, FILTER_VALIDATE_URL)) {
     bm_archive_json('error', 'input', 'لینک مبدأ معتبر نیست.');
 }
 
-// آدرس manual.php از config.php ربات ($urlsite) — همان سایت
-$manual_url = (isset($urlsite) && is_string($urlsite) && $urlsite !== '')
-    ? rtrim($urlsite, '/') . '/bot/manual.php'
-    : 'https://ahangban.ir/bot/manual.php';
+// آدرس manual.php: از $urlsite در config.php ربات، و اگر خالی بود (خودکار) از همین درخواست (همان سایت) — بدون دامنه‌ی ثابت
+if (isset($urlsite) && is_string($urlsite) && $urlsite !== '') {
+    $manual_url = rtrim($urlsite, '/') . '/bot/manual.php';
+} else {
+    $bm_https   = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower((string) $_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https')
+        || (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443);
+    $manual_url = ($bm_https ? 'https' : 'http') . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '/bot/manual.php';
+}
 
 // ارسال به manual.php با همان یوزر/رمزی که کاربر با آن وارد شده است
 $ch = curl_init($manual_url);
@@ -95,7 +100,7 @@ if ($code < 200 || $code >= 300) {
 }
 
 if ($parsed['title'] === '' && ($artist !== '' || $song !== '')) {
-    $parsed['title'] = trim("دانلود آهنگ {$artist} {$song}");
+    $parsed['title'] = bm_archive_title($artist, $song);
 }
 
 bm_archive_json($parsed['status'], $parsed['reason'], $parsed['message'], $parsed);

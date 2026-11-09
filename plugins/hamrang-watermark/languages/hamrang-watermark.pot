@@ -1,0 +1,823 @@
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Hamrang – Smart Cover Watermark 1.0.0\n"
+"Report-Msgid-Bugs-To: https://ahangban.ir/hamrang\n"
+"POT-Creation-Date: 2026-10-28 12:41+0000\n"
+"PO-Revision-Date: 2026-10-28 12:41+0000\n"
+"Last-Translator: Hamrang <info@ahangban.ir>\n"
+"Language-Team: Persian\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
+"X-Domain: hamrang-watermark\n"
+"X-Generator: hamrang-dev/make_pot.py\n"
+
+#. translators: 1: required PHP version, 2: current PHP version
+#: hamrang-watermark.php:60
+msgid "Hamrang needs PHP %1$s or newer; this server runs PHP %2$s."
+msgstr ""
+
+#: hamrang-watermark.php:61 hamrang-watermark.php:69
+msgid "Hamrang could not be activated"
+msgstr ""
+
+#: hamrang-watermark.php:68
+msgid ""
+"Hamrang needs the PHP GD image library, which is not enabled on this server."
+" Ask your host to enable the gd extension and try again."
+msgstr ""
+
+#: includes/class-hamrang-admin.php:102
+msgid "Choose logo"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:103
+msgid "Use this logo"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:104
+msgid "Choose a preview image"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:105
+msgid "Use this image"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:106
+msgid "Preview failed. Save the settings and try again."
+msgstr ""
+
+#: includes/class-hamrang-admin.php:107
+msgid "The logo should be a transparent PNG."
+msgstr ""
+
+#: includes/class-hamrang-admin.php:108
+msgid "Working…"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:109
+msgid "Done"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:110
+msgid "Stopped"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:111
+msgid "Nothing to process with this selection."
+msgstr ""
+
+#: includes/class-hamrang-admin.php:112
+msgid ""
+"Restore the originals of all selected images? Their watermark will be "
+"removed."
+msgstr ""
+
+#: includes/class-hamrang-admin.php:113
+msgid ""
+"Re-apply the watermark to every selected image, even the ones already up to "
+"date?"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:114
+msgid "The server did not answer — please try again."
+msgstr ""
+
+#: includes/class-hamrang-admin.php:115 admin/views/batch.php:82
+msgid "applied"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:116 admin/views/batch.php:84
+msgid "skipped"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:117 admin/views/batch.php:83
+msgid "restored"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:118 admin/views/batch.php:85
+msgid "errors"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:119
+msgid "of"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:130
+msgid "Hamrang – Smart Cover Watermark"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:131 includes/class-hamrang-admin.php:552
+#: includes/class-hamrang-admin.php:634 admin/views/settings.php:25
+msgid "Hamrang"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:138
+msgid "Hamrang settings"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:138 includes/class-hamrang-admin.php:218
+msgid "Settings"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:139 includes/class-hamrang-admin.php:139
+#: admin/views/batch.php:19
+msgid "Batch processing"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:140
+msgid "Hamrang guide"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:140
+msgid "Guide"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:298
+msgid "Select PNG"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:299
+msgid "Remove"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:312 includes/class-hamrang-admin.php:329
+#: includes/class-hamrang-admin.php:448 includes/class-hamrang-batch.php:33
+msgid "You are not allowed to do this."
+msgstr ""
+
+#: includes/class-hamrang-admin.php:362
+msgid "Could not create a temporary file."
+msgstr ""
+
+#: includes/class-hamrang-admin.php:378
+msgid "Sample logo shown — select your own logo above."
+msgstr ""
+
+#: includes/class-hamrang-admin.php:403
+msgid "Not supported (JPEG, PNG, WebP only)"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:409
+msgid "Watermarked"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:411
+msgid "Watermarked (older settings)"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:414
+msgid "no original stored"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:417
+msgid "No watermark"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:422 includes/class-hamrang-admin.php:535
+#: admin/views/batch.php:68
+msgid "Apply watermark"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:425
+msgid "Re-apply"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:428 includes/class-hamrang-admin.php:540
+msgid "Restore original"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:470 includes/class-hamrang-admin.php:494
+msgid "Invalid request."
+msgstr ""
+
+#: includes/class-hamrang-admin.php:537
+msgid "Re-apply watermark"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:580
+msgid "Hamrang: apply watermark"
+msgstr ""
+
+#: includes/class-hamrang-admin.php:581
+msgid "Hamrang: restore originals"
+msgstr ""
+
+#. translators: 1: applied, 2: restored, 3: skipped, 4: errors
+#: includes/class-hamrang-admin.php:659
+msgid "Hamrang: %1$d applied, %2$d restored, %3$d skipped, %4$d errors."
+msgstr ""
+
+#: includes/class-hamrang-admin.php:674
+msgid ""
+"Hamrang: the PHP GD image library is not available, so no watermark can be "
+"applied. Ask your host to enable the gd extension."
+msgstr ""
+
+#. translators: %s: settings page URL
+#: includes/class-hamrang-admin.php:685
+msgid ""
+"Hamrang is active. <a href=\"%s\">Choose your logo and the look of the "
+"watermark</a> to get started."
+msgstr ""
+
+#: includes/class-hamrang-media.php:73
+msgid "Already up to date"
+msgstr ""
+
+#: includes/class-hamrang-media.php:75
+msgid "Hamrang is switched off in its settings"
+msgstr ""
+
+#: includes/class-hamrang-media.php:77
+msgid "No logo selected yet — choose one in the Hamrang settings"
+msgstr ""
+
+#: includes/class-hamrang-media.php:79
+msgid "Not an image attachment"
+msgstr ""
+
+#: includes/class-hamrang-media.php:81
+msgid "Unsupported image type (JPEG, PNG and WebP are supported)"
+msgstr ""
+
+#: includes/class-hamrang-media.php:83
+msgid "The image file is missing on the server"
+msgstr ""
+
+#: includes/class-hamrang-media.php:85
+msgid "Not enough PHP memory for an image this large"
+msgstr ""
+
+#: includes/class-hamrang-media.php:87
+msgid ""
+"Could not create the backup copy (check the uploads folder permissions)"
+msgstr ""
+
+#: includes/class-hamrang-media.php:89
+msgid ""
+"Watermarked earlier with different settings and no original is stored — use "
+"\"Re-apply\" to stamp it anyway"
+msgstr ""
+
+#: includes/class-hamrang-media.php:91
+msgid "No Hamrang watermark on this image"
+msgstr ""
+
+#: includes/class-hamrang-media.php:93
+msgid "No original copy is stored for this image"
+msgstr ""
+
+#: includes/class-hamrang-media.php:95
+msgid ""
+"The original could not be written back (check the uploads folder "
+"permissions)"
+msgstr ""
+
+#: includes/class-hamrang-media.php:97
+msgid "Original restored"
+msgstr ""
+
+#: includes/class-hamrang-media.php:99
+msgid ""
+"Transparent PNG left alone (see the \"Leave transparent PNGs alone\" option)"
+msgstr ""
+
+#: includes/class-hamrang-media.php:101
+msgid "This image is the watermark logo itself"
+msgstr ""
+
+#: includes/class-hamrang-media.php:103
+msgid ""
+"This image is being processed by another request — try again in a moment"
+msgstr ""
+
+#: includes/class-hamrang-media.php:105
+msgid "Skipped by a hamrang_should_apply filter"
+msgstr ""
+
+#: includes/engine.php:101 includes/engine.php:115
+msgid "bottom right"
+msgstr ""
+
+#: includes/engine.php:102 includes/engine.php:116
+msgid "bottom left"
+msgstr ""
+
+#: includes/engine.php:103 includes/engine.php:113
+msgid "top right"
+msgstr ""
+
+#: includes/engine.php:104 includes/engine.php:114
+msgid "top left"
+msgstr ""
+
+#: includes/engine.php:1099
+msgid "square"
+msgstr ""
+
+#: includes/engine.php:1099
+msgid "rectangular"
+msgstr ""
+
+#. translators: 1: square/rectangular, 2: plate width in px, 3: hex colour, 4:
+#. position
+#: includes/engine.php:1102
+msgid "Logo applied on a frosted %1$s plate (%2$dpx, %3$s, %4$s)"
+msgstr ""
+
+#. translators: 1: square/rectangular, 2: plate width in px, 3: hex colour, 4:
+#. position
+#: includes/engine.php:1105
+msgid "Logo applied on a solid %1$s plate (%2$dpx, %3$s, %4$s)"
+msgstr ""
+
+#: includes/engine.php:1108
+msgid "dark logo on a light plate"
+msgstr ""
+
+#. translators: 1: logo width in px, 2: position
+#: includes/engine.php:1113
+msgid "Logo applied (%1$dpx, %2$s)"
+msgstr ""
+
+#: includes/engine.php:1115
+msgid "dark variant on a light corner"
+msgstr ""
+
+#. translators: 1: width, 2: height
+#: includes/engine.php:1121
+msgid "Image too small (%1$d×%2$d) — left untouched"
+msgstr ""
+
+#: includes/engine.php:1126
+msgid ""
+"Watermark failed — the GD image library is not available on this server"
+msgstr ""
+
+#: includes/engine.php:1128
+msgid "Watermark failed — logo file not found"
+msgstr ""
+
+#: includes/engine.php:1130
+msgid "Watermark failed — the logo must be a transparent PNG"
+msgstr ""
+
+#: includes/engine.php:1132
+msgid "Watermark failed — the logo is not a valid image"
+msgstr ""
+
+#: includes/engine.php:1134
+msgid "Watermark failed — the image could not be read"
+msgstr ""
+
+#: includes/engine.php:1136
+msgid ""
+"Watermark failed — the image could not be saved (check folder permissions)"
+msgstr ""
+
+#: includes/engine.php:1138
+msgid "Watermarking is disabled"
+msgstr ""
+
+#: includes/engine.php:1140
+msgid "Watermark failed"
+msgstr ""
+
+#: admin/views/batch.php:19
+msgid "Watermark or restore the images you already have"
+msgstr ""
+
+#: admin/views/batch.php:23
+msgid ""
+"Hamrang is switched off in its settings, so nothing can be applied right "
+"now."
+msgstr ""
+
+#. translators: %s: settings URL
+#: admin/views/batch.php:30
+msgid ""
+"No logo selected yet — <a href=\"%s\">choose one in the settings</a> before "
+"running the batch."
+msgstr ""
+
+#: admin/views/batch.php:41
+msgid "1. Which images?"
+msgstr ""
+
+#: admin/views/batch.php:45
+msgid "Featured images only"
+msgstr ""
+
+#: admin/views/batch.php:45
+msgid "Every image that is the featured image of at least one post."
+msgstr ""
+
+#: admin/views/batch.php:49
+msgid "Entire media library"
+msgstr ""
+
+#: admin/views/batch.php:49
+msgid "All JPEG, PNG and WebP attachments."
+msgstr ""
+
+#: admin/views/batch.php:53
+msgid "Never watermarked"
+msgstr ""
+
+#: admin/views/batch.php:53
+msgid "Images Hamrang has not touched yet."
+msgstr ""
+
+#: admin/views/batch.php:57
+msgid "Already watermarked"
+msgstr ""
+
+#. translators: %s: number of images
+#: admin/views/batch.php:60
+msgid "Currently %s images. Use this with \"Restore originals\" or \"Re-apply\"."
+msgstr ""
+
+#: admin/views/batch.php:66
+msgid "2. What to do"
+msgstr ""
+
+#: admin/views/batch.php:69
+msgid "Re-apply to all"
+msgstr ""
+
+#: admin/views/batch.php:70
+msgid "Restore originals"
+msgstr ""
+
+#: admin/views/batch.php:71
+msgid "Stop"
+msgstr ""
+
+#: admin/views/batch.php:73
+msgid ""
+"\"Apply\" skips images that already carry the current watermark and "
+"refreshes the ones stamped with older settings. \"Re-apply\" redoes every "
+"selected image. \"Restore\" puts the stored originals back and rebuilds "
+"their thumbnails."
+msgstr ""
+
+#: admin/views/batch.php:74
+msgid ""
+"Keep this tab open while it runs. You can stop at any time and continue "
+"later — nothing is processed twice."
+msgstr ""
+
+#: admin/views/batch.php:78
+msgid "Progress"
+msgstr ""
+
+#: admin/views/batch.php:93
+msgid "Good to know"
+msgstr ""
+
+#: admin/views/batch.php:95
+msgid ""
+"Each image is processed on the server in small groups; a few thousand covers"
+" take a while — just leave the tab open."
+msgstr ""
+
+#: admin/views/batch.php:96
+msgid ""
+"Thumbnails of every size are rebuilt from the watermarked image, so the "
+"whole site shows the new cover."
+msgstr ""
+
+#: admin/views/batch.php:97
+msgid ""
+"If a CDN or cache plugin is in front of your site, purge its image cache "
+"afterwards."
+msgstr ""
+
+#: admin/views/batch.php:98
+msgid ""
+"Restoring needs the stored original (\"Keep the untouched original\" "
+"option). Images stamped without it cannot be reverted."
+msgstr ""
+
+#: admin/views/settings.php:25
+msgid "Smart cover watermark"
+msgstr ""
+
+#: admin/views/settings.php:30
+msgid "Settings saved."
+msgstr ""
+
+#: admin/views/settings.php:33
+msgid ""
+"No logo selected yet. Pick a transparent PNG below — a white logo works best"
+" on the colour plate."
+msgstr ""
+
+#: admin/views/settings.php:44
+msgid "When to watermark"
+msgstr ""
+
+#: admin/views/settings.php:50
+msgid "Hamrang is enabled"
+msgstr ""
+
+#: admin/views/settings.php:52
+msgid ""
+"Master switch. When off, nothing is watermarked — not even from the batch "
+"tool."
+msgstr ""
+
+#: admin/views/settings.php:56
+msgid "Apply automatically to"
+msgstr ""
+
+#: admin/views/settings.php:61
+msgid "Featured images"
+msgstr ""
+
+#: admin/views/settings.php:62
+msgid ""
+"The moment an image is set as the featured image of a post (editor, REST "
+"API, importers, bots). Recommended for covers."
+msgstr ""
+
+#: admin/views/settings.php:68
+msgid "Every new image upload"
+msgstr ""
+
+#: admin/views/settings.php:69
+msgid ""
+"JPEG, PNG and WebP uploads are stamped before the thumbnails are generated."
+msgstr ""
+
+#: admin/views/settings.php:75
+msgid "Nothing automatically"
+msgstr ""
+
+#: admin/views/settings.php:76
+msgid "Only when you use the batch tool or the buttons in the media library."
+msgstr ""
+
+#: admin/views/settings.php:83
+msgid "Post types"
+msgstr ""
+
+#: admin/views/settings.php:89
+msgid "Leave everything unchecked to cover all post types."
+msgstr ""
+
+#: admin/views/settings.php:93
+msgid "Leave transparent PNGs alone (logos, icons, stickers)"
+msgstr ""
+
+#: admin/views/settings.php:94
+msgid ""
+"Applies to automatic processing and the batch tool; \"Re-apply\" on a single"
+" image still stamps it."
+msgstr ""
+
+#: admin/views/settings.php:98
+msgid ""
+"Keep the untouched original next to each processed image (lets you restore "
+"or re-style later)"
+msgstr ""
+
+#: admin/views/settings.php:99
+msgid ""
+"Strongly recommended. Without it a watermark cannot be removed or re-applied"
+" cleanly."
+msgstr ""
+
+#: admin/views/settings.php:104
+msgid "Skip images smaller than"
+msgstr ""
+
+#: admin/views/settings.php:106
+msgid ""
+"Shorter side in pixels. Thumbnails and icons below this size are never "
+"touched."
+msgstr ""
+
+#: admin/views/settings.php:109
+msgid "JPEG / WebP quality"
+msgstr ""
+
+#: admin/views/settings.php:117 admin/views/settings.php:272
+msgid "Logo"
+msgstr ""
+
+#: admin/views/settings.php:121
+msgid "Logo (transparent PNG, preferably white)"
+msgstr ""
+
+#: admin/views/settings.php:125
+msgid "Dark variant (optional)"
+msgstr ""
+
+#: admin/views/settings.php:127
+msgid ""
+"Used automatically on light plates and light corners so the logo always "
+"stays readable."
+msgstr ""
+
+#: admin/views/settings.php:133
+msgid "Corner"
+msgstr ""
+
+#: admin/views/settings.php:145
+msgid "Logo width"
+msgstr ""
+
+#: admin/views/settings.php:147
+msgid "Percent of the image width (free logo and rectangular plate)."
+msgstr ""
+
+#: admin/views/settings.php:150
+msgid "Distance from the edges"
+msgstr ""
+
+#: admin/views/settings.php:158
+msgid "Soft shadow under the logo / plate"
+msgstr ""
+
+#: admin/views/settings.php:160
+msgid "Shadow strength (no plate)"
+msgstr ""
+
+#: admin/views/settings.php:165
+msgid "Logo opacity (no plate)"
+msgstr ""
+
+#: admin/views/settings.php:173
+msgid "Colour plate"
+msgstr ""
+
+#: admin/views/settings.php:174
+msgid ""
+"The plate is a rounded badge behind the logo. In \"auto colour\" mode it "
+"takes the boldest colour of each image, so the badge always looks like it "
+"belongs to the cover."
+msgstr ""
+
+#: admin/views/settings.php:177
+msgid "Plate shape"
+msgstr ""
+
+#: admin/views/settings.php:179
+msgid "Auto (square or rectangle, by logo shape)"
+msgstr ""
+
+#: admin/views/settings.php:180
+msgid "Square"
+msgstr ""
+
+#: admin/views/settings.php:181
+msgid "Rectangle"
+msgstr ""
+
+#: admin/views/settings.php:182
+msgid "No plate (logo only)"
+msgstr ""
+
+#: admin/views/settings.php:189
+msgid "Style"
+msgstr ""
+
+#: admin/views/settings.php:191
+msgid "Frosted glass"
+msgstr ""
+
+#: admin/views/settings.php:192
+msgid "Solid"
+msgstr ""
+
+#: admin/views/settings.php:196
+msgid "Colour"
+msgstr ""
+
+#: admin/views/settings.php:198
+msgid "Auto — dominant colour of the image"
+msgstr ""
+
+#: admin/views/settings.php:199
+msgid "Fixed colour"
+msgstr ""
+
+#: admin/views/settings.php:209
+msgid "Square plate size"
+msgstr ""
+
+#: admin/views/settings.php:211
+msgid ""
+"Percent of the image width. The rectangular plate follows the logo width "
+"instead."
+msgstr ""
+
+#: admin/views/settings.php:214
+msgid "Plate fill"
+msgstr ""
+
+#: admin/views/settings.php:216
+msgid ""
+"100 = opaque. Lower values let the blurred image show through the glass."
+msgstr ""
+
+#: admin/views/settings.php:219
+msgid "Corner roundness"
+msgstr ""
+
+#: admin/views/settings.php:223
+msgid "Padding around the logo"
+msgstr ""
+
+#: admin/views/settings.php:232
+msgid "Housekeeping"
+msgstr ""
+
+#: admin/views/settings.php:234
+msgid ""
+"When the plugin is deleted, also remove its data (settings, per-image "
+"records and stored originals). Watermarked images stay as they are."
+msgstr ""
+
+#: admin/views/settings.php:235
+msgid ""
+"Tip: run \"Restore originals\" in the batch tool first if you want your "
+"untouched images back before uninstalling."
+msgstr ""
+
+#: admin/views/settings.php:240
+msgid "Save settings"
+msgstr ""
+
+#: admin/views/settings.php:241
+msgid "Batch processing →"
+msgstr ""
+
+#: admin/views/settings.php:247
+msgid "Live preview"
+msgstr ""
+
+#: admin/views/settings.php:252
+msgid "Change any option — the preview updates with the unsaved values."
+msgstr ""
+
+#: admin/views/settings.php:260
+msgid "Preview on one of your own images"
+msgstr ""
+
+#: admin/views/settings.php:267
+msgid "Status"
+msgstr ""
+
+#: admin/views/settings.php:269
+msgid "GD image library"
+msgstr ""
+
+#: admin/views/settings.php:269
+msgid "available"
+msgstr ""
+
+#: admin/views/settings.php:269
+msgid "missing"
+msgstr ""
+
+#: admin/views/settings.php:270
+msgid "WebP support"
+msgstr ""
+
+#: admin/views/settings.php:270
+msgid "yes"
+msgstr ""
+
+#: admin/views/settings.php:270
+msgid "no"
+msgstr ""
+
+#: admin/views/settings.php:271
+msgid "memory"
+msgstr ""
+
+#: admin/views/settings.php:272
+msgid "selected"
+msgstr ""
+
+#: admin/views/settings.php:272
+msgid "not selected"
+msgstr ""
+
+#. translators: %s: number of images
+#: admin/views/settings.php:276
+msgid "%s image carries the watermark"
+msgid_plural "%s images carry the watermark"
+msgstr[0] ""
+msgstr[1] ""
+
+#: admin/views/settings.php:280
+msgid ""
+"Changed the logo or the look? Already-stamped images keep the old look until"
+" you run the batch tool (up-to-date ones are skipped automatically)."
+msgstr ""
