@@ -11,6 +11,8 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/watermark.php';
 // WebP برای سایزهای نمایشی کاور (فایل اصلی دست‌نخورده می‌ماند؛ تنظیمات $bot_webp_* در config.php)
 require_once __DIR__ . '/webp.php';
+// خواندن مستقیم صفحه‌ی آهنگ سایت مبدأ (به‌جای API قدیمی که صفحه‌های جدید بیاتوموزیک را نمی‌خواند؛ $bot_source_parser در config.php)
+require_once __DIR__ . '/source.php';
 
 // هاست دانلود خودکار: $urldlhost خالی در config.php → AHANGBAN_DL_HOST (wp-config) یا https://dl.<دامنه‌ی سایت>؛
 // $functions_dl_music خالی → {$urldlhost}/music.php — این‌جا (بعد از wp-load) چون به home_url نیاز دارد
@@ -394,6 +396,97 @@ function bm_curl_post_json($url, array $payload, $timeout = 30) {
         'errno'    => $errno,
         'code'     => $code,
     ];
+}
+
+/**
+ * داده‌ی صفحه‌ی مبدأ (نام آهنگ/خواننده، کاور، لینک‌های 320/128، عوامل، متن ترانه) — همان شکل پاسخ API قدیمی
+ * $bot_source_parser (config.php):
+ *   'auto' (پیش‌فرض) = اول خودِ صفحه خوانده می‌شود (bot/source.php)؛ اگر خوانده نشد یا لینک فایل نداشت، API قدیمی امتحان می‌شود
+ *                     و اگر API لینک داشت پاسخ API مبنا می‌شود (نام‌های صفحه اگر در API خالی بود پر می‌شوند)
+ *   'page'           = فقط صفحه    |    'api' = فقط API قدیمی (رفتار قبلی)
+ * خروجی: ['ok' => bool, 'result' => array|null, 'from' => 'page'|'api'|'', 'kind' => music|album|video|playlist|'', 'error' => '', 'notes' => []]
+ */
+function bm_fetch_source($url, $api_url = '') {
+    $mode = isset($GLOBALS['bot_source_parser']) ? strtolower(trim((string) $GLOBALS['bot_source_parser'])) : 'auto';
+    if (!in_array($mode, ['auto', 'page', 'api'], true)) {
+        $mode = 'auto';
+    }
+    if ($api_url === '') {
+        $api_url = !empty($GLOBALS['apiUrl']) ? (string) $GLOBALS['apiUrl'] : 'https://api.wintheme.ir/b2m.php';
+    }
+    $out  = ['ok' => false, 'result' => null, 'from' => '', 'kind' => '', 'error' => '', 'notes' => []];
+    $page = null;
+    $page_error = '';
+
+    if ($mode !== 'api' && function_exists('bm_source_read')) {
+        $page = bm_source_read($url);
+        if (is_array($page['result'])) {
+            $out['ok']     = true;
+            $out['result'] = $page['result'];
+            $out['from']   = 'page';
+            $out['kind']   = (string) $page['kind'];
+            $out['notes']  = (array) $page['notes'];
+            $has_file = $page['result']['music320'] !== '' || $page['result']['music128'] !== '';
+            if ($mode === 'page' || $has_file || $out['kind'] !== 'music') {
+                return $out; // صفحه کامل خوانده شد (یا آلبوم/ویدیو است که به هر حال رد می‌شود)
+            }
+            $page_error = 'صفحه خوانده شد ولی لینک فایل آهنگ در آن پیدا نشد';
+        } else {
+            $page_error = (string) $page['error'];
+            if ($mode === 'page') {
+                $out['error'] = 'خواندن صفحه‌ی مبدأ: ' . $page_error;
+                return $out;
+            }
+        }
+    }
+
+    // API قدیمی (حالت api یا وقتی صفحه کامل خوانده نشد)
+    $api = bm_curl_post_json($api_url, ['url' => $url]);
+    $api_error = '';
+    $data      = null;
+    if (empty($api['success'])) {
+        $api_error = 'خطا در ارتباط با API. HTTP: ' . intval($api['code']) . ' | cURL: ' . $api['error']
+            . ' | Response: ' . mb_substr((string) $api['response'], 0, 500);
+    } else {
+        $data = json_decode((string) $api['response'], true);
+        if (!is_array($data)) {
+            $api_error = 'پاسخ API معتبر نیست';
+        } elseif (!empty($data['error'])) {
+            $api_error = 'API: ' . $data['error'];
+        }
+    }
+
+    if ($api_error === '' && is_array($data)) {
+        $api_has_file = trim((string) ($data['music320'] ?? '')) !== '' || trim((string) ($data['music128'] ?? '')) !== '';
+        if ($out['ok'] && !$api_has_file) {
+            // صفحه خوانده شده بود و API هم لینکی ندارد → همان داده‌ی صفحه (script.php «بدون فایل» را گزارش می‌کند)
+            $out['notes'][] = $page_error . '؛ API قدیمی هم لینک فایل نداشت';
+            return $out;
+        }
+        if ($out['ok'] && is_array($out['result'])) {
+            // نام‌ها و متن ترانه‌ای که در API خالی است از صفحه پر می‌شود
+            foreach (['song', 'artist', 'song_en', 'artist_en', 'image', 'matnmusic', 'mood', 'style', 'songwriter', 'composer', 'regulator', 'mix'] as $key) {
+                if (trim((string) ($data[$key] ?? '')) === '' && !empty($out['result'][$key])) {
+                    $data[$key] = $out['result'][$key];
+                }
+            }
+            $out['notes'][] = $page_error . '؛ لینک‌ها از API قدیمی گرفته شد';
+        } elseif ($page_error !== '') {
+            $out['notes'][] = $page_error . '؛ از API قدیمی استفاده شد';
+        }
+        $out['ok']     = true;
+        $out['result'] = $data;
+        $out['from']   = 'api';
+        return $out;
+    }
+
+    if ($out['ok']) {
+        // صفحه خوانده شده (بدون لینک) و API هم جواب نداد → داده‌ی صفحه برمی‌گردد تا پیام «بدون فایل» دقیق باشد
+        $out['notes'][] = $page_error . '؛ API قدیمی هم در دسترس نبود (' . $api_error . ')';
+        return $out;
+    }
+    $out['error'] = ($page_error !== '' ? 'خواندن صفحه‌ی مبدأ: ' . $page_error . ' | ' : '') . $api_error;
+    return $out;
 }
 
 /** User-Agent مرورگر برای تماس با هاست دانلود؛ nginx/WAF خیلی از هاست‌ها درخواست بدون User-Agent را 403 می‌کند */
@@ -1666,27 +1759,21 @@ function bm_build_post_content($args = []) {
 }
 
 /* -------------------------------------------------------
- |  1) دریافت داده از API
+ |  1) دریافت داده‌ی صفحه‌ی مبدأ — خواندن مستقیم صفحه (bot/source.php)؛ API قدیمی فقط پشتیبان ($bot_source_parser در config.php)
  * ------------------------------------------------------ */
-$api_response = bm_curl_post_json($apiUrl, [
-    'url' => $postUrl,
-]);
+$bm_fetch = bm_fetch_source($postUrl, $apiUrl);
 
-if (!$api_response['success']) {
-    $api_fail = 'خطا در ارتباط با API. HTTP: ' . intval($api_response['code'])
-        . ' | cURL: ' . $api_response['error']
-        . ' | Response: ' . mb_substr((string) $api_response['response'], 0, 500);
+if (empty($bm_fetch['ok']) || !is_array($bm_fetch['result'])) {
+    $api_fail = 'خطا در خواندن صفحه‌ی مبدأ: ' . (string) $bm_fetch['error']
+        . ' — آزمایش همین لینک: bot/source-test.php?url=' . rawurlencode((string) $postUrl);
     exit(esc_html($api_fail) . bm_result_marker('error', ['reason' => 'api', 'message' => $api_fail]));
 }
 
-$result = json_decode($api_response['response'], true);
-
-if (!is_array($result)) {
-    exit('خطا: پاسخ API معتبر نیست.' . bm_result_marker('error', ['reason' => 'api', 'message' => 'پاسخ API معتبر نیست']));
-}
-
-if (!empty($result['error'])) {
-    exit('API Error: ' . esc_html($result['error']) . bm_result_marker('error', ['reason' => 'api', 'message' => 'API: ' . $result['error']]));
+$result        = $bm_fetch['result'];
+$bm_page_kind  = isset($result['kind']) ? (string) $result['kind'] : (string) $bm_fetch['kind']; // music | album | video | playlist | ''
+echo '<p>منبع داده: ' . ($bm_fetch['from'] === 'page' ? 'خودِ صفحه‌ی مبدأ' : 'API قدیمی') . '</p>';
+foreach ((array) $bm_fetch['notes'] as $bm_fetch_note) {
+    echo '<p>' . esc_html($bm_fetch_note) . '</p>';
 }
 
 /* -------------------------------------------------------
@@ -1722,19 +1809,31 @@ $matnmusic  = trim($result['matnmusic'] ?? '');
  |  3) اعتبارسنجی داده‌های حیاتی
  * ------------------------------------------------------ */
 if ($artist === '' || $song === '') {
-    exit('خطا: نام خواننده یا نام آهنگ از API دریافت نشد.' . bm_result_marker('error', ['reason' => 'api', 'message' => 'نام خواننده یا نام آهنگ از API دریافت نشد']));
+    exit('خطا: نام خواننده یا نام آهنگ از صفحه‌ی مبدأ دریافت نشد.' . bm_result_marker('error', ['reason' => 'api', 'message' => 'نام خواننده یا نام آهنگ از صفحه‌ی مبدأ دریافت نشد']));
 }
 
-// صفحه‌ی مبدأ باید دست‌کم یک لینک فایل آهنگ (320 یا 128) داشته باشد. صفحه‌ی آلبوم، موزیک ویدیو یا پلی‌لیست لینک تک‌آهنگ
-// ندارد و ساختن پست برای آن فقط یک پیش‌نویس بی‌فایده با خطای «no music url was sent» روی هاست دانلود می‌سازد.
-// ربات فقط تک‌آهنگ ثبت می‌کند؛ آلبوم و ویدیو را با پست‌ساز بفرستید. (قبل از ساختن پست متوقف می‌شود؛ چیزی ثبت نمی‌شود.)
-if ($music320 === '' && $music128 === '') {
-    $bm_nofile_kind = bm_guess_source_kind($postUrl, $video_low !== '' || $video_med !== '');
-    $bm_nofile_msg  = 'در صفحه‌ی مبدأ لینک فایل آهنگ (320/128) پیدا نشد'
-        . ($bm_nofile_kind !== '' ? ' — این صفحه ' . $bm_nofile_kind . ' است' : '')
+// ربات فقط تک‌آهنگ ثبت می‌کند. صفحه‌ی آلبوم (و قطعه‌های داخل آلبوم)، موزیک ویدیو یا پلی‌لیست قبل از ساختن پست کنار گذاشته
+// می‌شود (در ارسال خودکار «رد شد» و دیگر تکرار نمی‌شود) — این‌ها را با پست‌ساز بفرستید. نوع صفحه را خواننده‌ی صفحه (bot/source.php)
+// از JSON-LD و متن صفحه تشخیص می‌دهد؛ اگر معلوم نبود از نامک لینک حدس زده می‌شود.
+// صفحه‌ی تک‌آهنگی که لینک فایل (320/128) ندارد هم پست نمی‌شود (پیش‌نویس بی‌فایده با خطای «no music url was sent» روی هاست دانلود
+// می‌ساخت)؛ در ارسال خودکار «ثبت نشد» می‌شود و تا $max_attempts بار دیگر امتحان می‌شود (شاید لینک بعداً اضافه شود).
+$bm_not_single = ($bm_page_kind !== '' && $bm_page_kind !== 'music')
+    ? (function_exists('bm_source_kind_label') ? bm_source_kind_label($bm_page_kind) : $bm_page_kind)
+    : bm_guess_source_kind($postUrl, $video_low !== '' || $video_med !== '');
+if ($bm_not_single !== '') {
+    $bm_nofile_msg = 'این صفحه ' . $bm_not_single . ' است'
+        . (($music320 === '' && $music128 === '') ? ' و لینک تک‌آهنگ ندارد' : '')
         . '؛ ربات فقط تک‌آهنگ ثبت می‌کند (آلبوم/ویدیو را با پست‌ساز بفرستید)';
     if (isset($GLOBALS['bm_auto_job']) && is_array($GLOBALS['bm_auto_job'])) {
         $GLOBALS['bm_auto_job']['skipped'] = $bm_nofile_msg; // auto.php: این آیتم «رد شد» ثبت می‌شود و دیگر تکرار نمی‌شود
+    }
+    exit('خطا: ' . $bm_nofile_msg . bm_result_marker('error', ['reason' => 'nofile', 'message' => $bm_nofile_msg]));
+}
+if ($music320 === '' && $music128 === '') {
+    $bm_nofile_msg = 'در صفحه‌ی مبدأ لینک فایل آهنگ (320/128) پیدا نشد؛ پست ساخته نشد'
+        . ' (اگر صفحه واقعاً دکمه‌ی دانلود دارد، ساختار سایت مبدأ عوض شده — bot/source-test.php?url=… را روی همین لینک باز کنید)';
+    if ($bm_fetch['from'] === 'api' && isset($GLOBALS['bm_auto_job']) && is_array($GLOBALS['bm_auto_job'])) {
+        $GLOBALS['bm_auto_job']['skipped'] = $bm_nofile_msg; // حالت API قدیمی: مثل قبل، بدون فایل = آلبوم/ویدیو → رد شد
     }
     exit('خطا: ' . $bm_nofile_msg . bm_result_marker('error', ['reason' => 'nofile', 'message' => $bm_nofile_msg]));
 }
@@ -1745,6 +1844,10 @@ if ($artist_en === '') {
 
 if ($song_en === '') {
     $song_en = $song;
+}
+
+if (isset($GLOBALS['bm_auto_job']) && is_array($GLOBALS['bm_auto_job'])) {
+    $GLOBALS['bm_auto_job']['title'] = $artist . ' – ' . $song; // خلاصه‌ی auto.php: نام واقعی به‌جای نامک لینک (آیتم‌های نقشه‌ی سایت عنوان ندارند)
 }
 
 /* -------------------------------------------------------

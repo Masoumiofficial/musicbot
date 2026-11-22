@@ -1,6 +1,10 @@
 <?php
 /**
- * ارسال خودکار از فید — در هر اجرا یک آهنگ جدید ثبت می‌شود (نسخه ۳)
+ * ارسال خودکار از سایت مبدأ — در هر اجرا یک آهنگ جدید ثبت می‌شود (نسخه ۴)
+ *
+ * منبع آیتم‌های جدید: $bot_feed_urls در config.php (به ترتیب امتحان می‌شود؛ RSS، Atom یا نقشه‌ی سایت). بیاتوموزیک آذر ۱۴۰۵
+ * فید /feed را حذف کرد؛ آیتم‌ها حالا از نقشه‌ی سایت «آهنگ‌های تازه» (new-sitemap.xml) خوانده می‌شود و خود صفحه‌ی هر آهنگ
+ * مستقیم خوانده می‌شود (bot/source.php) — API قدیمی فقط پشتیبان است. آزمایش: bot/source-test.php?feed=1
  *
  * دسترسی (دو حالت):
  *   الف) رمز ربات روی خود سرور تعریف شده باشد — یک خط در wp-config.php بالای «That's all, stop editing»:
@@ -14,35 +18,33 @@
  *            wget -q -O /dev/null --user='sajad' --password='رمز' https://ahangban.ir/bot/auto.php
  *   هر ۵ دقیقه یک بار کافی است (0,5,10,15,... * * * *). اجراهای هم‌زمان قفل می‌شوند.
  *
- * آیتم‌های بررسی‌شده‌ی فید در جدول wp_subcheck نگه داشته می‌شوند (اگر نباشد ساخته می‌شود).
+ * آیتم‌های بررسی‌شده در جدول wp_subcheck نگه داشته می‌شوند (اگر نباشد ساخته می‌شود).
  * اگر ثبت آیتمی با خطا تمام شود (مثلاً API در دسترس نباشد) وضعیتش failed می‌شود و فقط وقتی
- * آیتم جدیدی در فید نباشد، حداکثر $max_attempts بار دوباره امتحان می‌شود؛ یعنی یک آیتم خراب
+ * آیتم جدیدی در فهرست نباشد، حداکثر $max_attempts بار دوباره امتحان می‌شود؛ یعنی یک آیتم خراب
  * جلوی آهنگ‌های جدید را نمی‌گیرد و یک قطعی موقت هم باعث از دست رفتن آهنگ نمی‌شود.
- * ربات فقط تک‌آهنگ ثبت می‌کند: آیتم‌های آلبوم / موزیک ویدیو / پلی‌لیست فید (از روی عنوان «دانلود آلبوم …»،
- * «دانلود موزیک ویدیو …» یا نامک لینک) بدون تماس با API با وضعیت skipped کنار گذاشته می‌شوند و اگر صفحه‌ای
- * لینک فایل آهنگ نداشت (script.php قبل از ساختن پست متوجه می‌شود) هم skipped می‌شود — این‌ها را با پست‌ساز بفرستید.
+ * ربات فقط تک‌آهنگ ثبت می‌کند: آیتم‌های آلبوم / موزیک ویدیو / پلی‌لیست (از روی عنوان «دانلود آلبوم …»،
+ * «دانلود موزیک ویدیو …» یا نامک لینک) بدون خواندن صفحه با وضعیت skipped کنار گذاشته می‌شوند؛ آلبوم/ویدیویی که از نامک
+ * معلوم نیست را script.php بعد از خواندن صفحه (JSON-LD و متن صفحه) رد می‌کند (skipped) — این‌ها را با پست‌ساز بفرستید.
+ * تک‌آهنگی که در صفحه‌اش لینک فایل پیدا نشد failed می‌شود و مثل خطاهای دیگر تا $max_attempts بار دوباره امتحان می‌شود.
  */
 include("config.php");
 require_once __DIR__ . '/auth.php';
 include(dirname(__DIR__) . '/wp-load.php'); // قبل از بررسی دسترسی، تا BM_AUTH_PASS داخل wp-config.php دیده شود
 set_time_limit(0);
 
-$rssFeedUrl     = "https://www.mybia2music.com/feed";
-$subcheck_table = 'wp_subcheck'; // جدول آیتم‌های بررسی‌شده‌ی فید
-$max_feed_items = 30;            // چند آیتم اول فید بررسی شود
+require_once __DIR__ . '/source.php'; // خواندن فهرست آیتم‌های جدید (فید / نقشه‌ی سایت) و صفحه‌ی آهنگ
+
+// فهرست منابع آیتم‌های جدید: config.php ($bot_feed_urls)؛ اگر تعریف نشده بود، پیش‌فرض‌ها
+$feed_urls = (isset($bot_feed_urls) && is_array($bot_feed_urls) && !empty($bot_feed_urls))
+    ? $bot_feed_urls
+    : ['https://www.mybia2music.com/new-sitemap.xml', 'https://www.mybia2music.com/feed'];
+if (!empty($rssFeedUrl)) {
+    array_unshift($feed_urls, $rssFeedUrl); // سازگاری با تنظیم قدیمی
+}
+$subcheck_table = 'wp_subcheck'; // جدول آیتم‌های بررسی‌شده‌ی فهرست
+$max_feed_items = 30;            // چند آیتم اول فهرست (جدیدترین‌ها) بررسی شود
 $max_attempts   = 3;             // آیتم خطادار حداکثر چند بار (در اجراهای بعدی) دوباره امتحان شود
 $lock_minutes   = 15;            // اگر اجرای قبلی هنوز تمام نشده، تا این مدت اجرای جدید شروع نمی‌شود
-
-$arrContextOptions = [
-    'ssl'  => [
-        'verify_peer'      => false,
-        'verify_peer_name' => false,
-    ],
-    'http' => [
-        'timeout' => 30,
-        'header'  => "User-Agent: Mozilla/5.0 (compatible; AhangBanBot/1.0; +" . home_url() . ")\r\n",
-    ],
-];
 
 /**
  * جدول wp_subcheck: اگر نبود ساخته می‌شود؛ اگر از نسخه‌ی قدیمی (فقط ستون url) بود، ستون‌های وضعیت اضافه می‌شوند
@@ -130,6 +132,12 @@ function bm_auto_item_kind($title, $url) {
     if (strpos($path, '/playlist') !== false) {
         return 'پلی‌لیست';
     }
+    if (preg_match('#^/(?:albums?)(?:/|$)#', $path)) {
+        return 'آلبوم';
+    }
+    if (preg_match('#^/(?:videos?|teasers?|karaoke)(?:/|$)#', $path)) {
+        return 'موزیک ویدیو';
+    }
     return '';
 }
 
@@ -160,7 +168,7 @@ function bm_auto_finish() {
             $attempts = (int) $job['attempts'];
             $line = 'ثبت نشد: ' . $job['title'] . ' — '
                 . ($attempts < $job['max_attempts']
-                    ? 'وقتی آیتم جدیدی در فید نباشد دوباره امتحان می‌شود (تلاش ' . $attempts . ' از ' . $job['max_attempts'] . ').'
+                    ? 'وقتی آیتم جدیدی در فهرست نباشد دوباره امتحان می‌شود (تلاش ' . $attempts . ' از ' . $job['max_attempts'] . ').'
                     : 'بعد از ' . $job['max_attempts'] . ' تلاش کنار گذاشته شد.');
         }
     }
@@ -213,10 +221,10 @@ if ($bm_quiet) {
 }
 
 /* -------------------------------------------------------
- |  2) پیش‌شرط‌ها — قبل از دست زدن به فید، تا آیتمی بی‌دلیل مصرف نشود
+ |  2) پیش‌شرط‌ها — قبل از خواندن فهرست، تا آیتمی بی‌دلیل مصرف نشود
  * ------------------------------------------------------ */
 if (bm_auth_userpwd() === '') {
-    bm_auto_stop('خطا: یوزر/رمز اتصال به هاست دانلود در دسترس نیست؛ هیچ آیتمی از فید پردازش نشد. '
+    bm_auto_stop('خطا: یوزر/رمز اتصال به هاست دانلود در دسترس نیست؛ هیچ آیتمی پردازش نشد. '
         . 'یا BM_AUTH_PASS را در wp-config.php تعریف کنید یا کران را با یوزر/رمز ربات صدا بزنید.');
 }
 
@@ -230,34 +238,27 @@ global $wpdb;
 bm_auto_prepare_table($wpdb, $subcheck_table);
 
 /* -------------------------------------------------------
- |  3) فید
+ |  3) فهرست آیتم‌های جدید (فید RSS/Atom یا نقشه‌ی سایت؛ اولین منبعی که آیتم داشت)
  * ------------------------------------------------------ */
-$rssContent = @file_get_contents($rssFeedUrl, false, stream_context_create($arrContextOptions));
+$feed = bm_source_feed_items($feed_urls, $max_feed_items);
 
-if ($rssContent === FALSE) {
-    bm_auto_stop("خطا در بارگذاری فید");
-}
-
-$rssXml = @simplexml_load_string($rssContent);
-if ($rssXml === FALSE) {
-    bm_auto_stop("خطا در تجزیه فید XML");
+if (empty($feed['items'])) {
+    bm_auto_stop('خطا در بارگذاری فهرست آهنگ‌های جدید سایت مبدأ — ' . implode(' | ', $feed['errors'])
+        . ' — منابع در config.php ($bot_feed_urls) تعریف می‌شوند؛ آزمایش: bot/source-test.php?feed=1');
 }
 
 $items = [];
-$i     = 0;
-foreach ($rssXml->channel->item as $item) {
-    if (++$i > $max_feed_items) {
-        break;
-    }
-    $url = esc_url((string) $item->link);
+foreach ($feed['items'] as $url => $title) {
+    $url = esc_url_raw((string) $url);
     if ($url !== '') {
-        $items[$url] = esc_html((string) $item->title);
+        $items[$url] = esc_html((string) $title);
     }
 }
 
 if (empty($items)) {
-    bm_auto_stop('فید خالی بود.');
+    bm_auto_stop('فهرست آهنگ‌های جدید خالی بود (' . $feed['source'] . ').');
 }
+echo '<p>منبع فهرست: ' . esc_html($feed['source']) . ' (' . count($items) . ' آیتم)</p>';
 
 /* -------------------------------------------------------
  |  4) انتخاب آیتم: اول آیتم‌های کاملاً جدید؛ اگر نبود، آیتم خطادار با تلاش باقی‌مانده
@@ -273,7 +274,8 @@ foreach ((array) $rows as $row) {
     $seen[$row->url] = $row;
 }
 
-// آلبوم / موزیک ویدیو / پلی‌لیست: بدون تماس با API کنار گذاشته می‌شود (status = skipped) تا آیتم بعدی فید نوبت بگیرد
+// آلبوم / موزیک ویدیو / پلی‌لیست (از عنوان یا نامک): بدون خواندن صفحه کنار گذاشته می‌شود (status = skipped) تا آیتم بعدی نوبت بگیرد
+// (آیتم‌های نقشه‌ی سایت عنوان ندارند؛ آلبوم/ویدیویی که از نامک معلوم نیست را script.php بعد از خواندن صفحه رد می‌کند)
 $skipped_now = [];
 foreach ($items as $url => $title) {
     if (isset($seen[$url])) {
@@ -317,7 +319,7 @@ if ($candidate === null) {
 }
 
 if ($candidate === null) {
-    bm_auto_stop('آیتم جدیدی در فید نبود (' . count($items) . ' آیتم بررسی شد' . (!empty($skipped_now) ? '؛ ' . count($skipped_now) . ' آیتم آلبوم/ویدیو رد شد' : '') . ').');
+    bm_auto_stop('آیتم جدیدی در فهرست نبود (' . count($items) . ' آیتم بررسی شد' . (!empty($skipped_now) ? '؛ ' . count($skipped_now) . ' آیتم آلبوم/ویدیو رد شد' : '') . ').');
 }
 
 if ($retry) {
@@ -349,7 +351,7 @@ echo '<p>در حال ثبت: <a href="' . esc_url($candidate) . '">' . $items[$c
  |  5) ثبت پست — یک آیتم در هر اجرا
  * ------------------------------------------------------ */
 $postUrl    = $candidate;
-$bot_source = 'auto'; // ارسال خودکار از فید → فقط دسته‌ی دانلود آهنگ
+$bot_source = 'auto'; // ارسال خودکار → فقط دسته‌ی دانلود آهنگ
 include("script.php");
 
 // رسیدن به این‌جا یعنی script.php بدون exit تمام شد و پست ساخته شده است

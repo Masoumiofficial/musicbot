@@ -195,14 +195,12 @@ function dlr_media_for_post($post_id, $manual_source, $api_url) {
         return ['ok' => false, 'media' => [], 'from' => '', 'error' => 'لینک مبدأ معتبر نیست: ' . $source];
     }
 
-    $api = bm_curl_post_json($api_url, ['url' => $source]);
-    if (empty($api['success'])) {
-        return ['ok' => false, 'media' => [], 'from' => '', 'error' => 'API پاسخ نداد (HTTP ' . (int) $api['code'] . ' ' . $api['error'] . ')'];
+    // خواندن مستقیم صفحه‌ی مبدأ (bot/source.php)؛ API قدیمی فقط پشتیبان — $bot_source_parser در config.php
+    $fetch = bm_fetch_source($source, $api_url);
+    if (empty($fetch['ok']) || !is_array($fetch['result'])) {
+        return ['ok' => false, 'media' => [], 'from' => '', 'error' => 'صفحه‌ی مبدأ خوانده نشد: ' . (string) $fetch['error']];
     }
-    $data = json_decode((string) $api['response'], true);
-    if (!is_array($data) || !empty($data['error'])) {
-        return ['ok' => false, 'media' => [], 'from' => '', 'error' => 'API: ' . (is_array($data) && !empty($data['error']) ? $data['error'] : 'پاسخ نامعتبر')];
-    }
+    $data  = $fetch['result'];
     $media = [
         'music320' => trim((string) ($data['music320'] ?? '')),
         'music128' => trim((string) ($data['music128'] ?? '')),
@@ -210,12 +208,12 @@ function dlr_media_for_post($post_id, $manual_source, $api_url) {
         'source'   => $source,
     ];
     if ($media['music320'] === '' && $media['music128'] === '') {
-        return ['ok' => false, 'media' => [], 'from' => '', 'error' => 'API لینک فایل برنگرداند'];
+        return ['ok' => false, 'media' => [], 'from' => '', 'error' => 'در صفحه‌ی مبدأ لینک فایل پیدا نشد' . (!empty($fetch['kind']) && $fetch['kind'] !== 'music' ? ' (صفحه ' . bm_source_kind_label($fetch['kind']) . ' است)' : '')];
     }
     if ($manual_source !== '' && get_post_meta($post_id, '_bm_source_url', true) === '') {
         update_post_meta($post_id, '_bm_source_url', esc_url_raw($manual_source));
     }
-    return ['ok' => true, 'media' => $media, 'from' => 'API (' . $source . ')', 'error' => ''];
+    return ['ok' => true, 'media' => $media, 'from' => ($fetch['from'] === 'page' ? 'صفحه‌ی مبدأ' : 'API قدیمی') . ' (' . $source . ')', 'error' => ''];
 }
 
 /**

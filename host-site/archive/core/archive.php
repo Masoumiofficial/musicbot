@@ -69,12 +69,13 @@ if (!function_exists('bm_archive_norm')) {
      * (title = عنوانی که ربات می‌سازد؛ titles = همان + عنوان‌های الگوی قدیمی برای مقایسه با پست‌های موجود)
      * (سایت مبدأ جدیدترین را اول نشان می‌دهد؛ «ارسال همه» باید از قدیمی‌ترین شروع کند)
      */
-    function bm_archive_parse_listing($html) {
+    function bm_archive_parse_listing($html, $base_url = '') {
         $items = [];
         if (!is_string($html) || $html === '') {
             return $items;
         }
 
+        // ساختار قدیمی (وردپرس): <article class="item ">…<span class="txt">خواننده</span>…<span class="songname">آهنگ</span>
         preg_match_all('/(<article class="item ">.*<\/article>)/isU', $html, $blocks);
         $seen = [];
         foreach ($blocks[0] as $block) {
@@ -101,7 +102,25 @@ if (!function_exists('bm_archive_norm')) {
             ];
         }
 
-        return array_reverse($items);
+        // ساختار جدید (Next.js، آذر ۱۴۰۵): لینک‌های /{id}/{slug} با «<strong>آهنگ</strong> خواننده» — bot/source.php
+        if (empty($items) && function_exists('bm_source_artist_listing')) {
+            foreach (bm_source_artist_listing($html, $base_url) as $row) {
+                $artist = bm_archive_norm($row['artist']);
+                $song   = bm_archive_norm($row['song']);
+                if ($row['url'] === '' || $song === '') {
+                    continue;
+                }
+                $items[] = [
+                    'url'    => $row['url'],
+                    'artist' => $artist,
+                    'song'   => $song,
+                    'title'  => bm_archive_title($artist, $song),
+                    'titles' => bm_archive_title_variants($artist, $song),
+                ];
+            }
+        }
+
+        return array_reverse($items); // صفحه جدیدترین اول است؛ آرشیو از قدیمی به جدید می‌فرستد
     }
 
     /**
