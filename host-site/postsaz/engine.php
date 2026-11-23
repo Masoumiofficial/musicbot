@@ -784,6 +784,38 @@ function ps_apply_metas($post_id, array $metas) {
     }
 }
 
+/**
+ * «تاریخ انتشار واقعی» از فرم (فیلد release_date؛ شمسی یا میلادی، رقم فارسی هم می‌شود)
+ * خروجی: ['raw', 'pair' => ['g' => 'Y-m-d', 'j' => 'Y/m/d'], 'error']   — خالی = چیزی ثبت نمی‌شود (سایت «انتشار در سایت» را نشان می‌دهد)
+ * پیش از ساخت پست صدا زده می‌شود تا تاریخ نامعتبر همان اول برگردانده شود (نه بعد از انتقال فایل‌ها)
+ */
+function ps_release_date_input() {
+    $raw = ps_text('release_date');
+    $out = ['raw' => $raw, 'pair' => ['g' => '', 'j' => ''], 'error' => ''];
+    if ($raw === '') {
+        return $out;
+    }
+    $pair = function_exists('bm_release_date_pair') ? bm_release_date_pair($raw) : ['g' => '', 'j' => ''];
+    if ($pair['g'] === '') {
+        $out['error'] = 'تاریخ انتشار «' . $raw . '» معتبر نیست؛ شمسی مثل ۱۴۰۳/۰۵/۱۲ یا میلادی مثل 2024-08-02 بنویسید (یا خالی بگذارید).';
+        return $out;
+    }
+    $out['pair'] = $pair;
+    return $out;
+}
+
+/**
+ * ثبت تاریخ انتشار واقعی روی پست: همان جایی که قالب می‌خواند (جعبه‌ی «تاریخ انتشار واقعی آهنگ» ترانه‌یار = متای _tara_release_date
+ * میلادی Y-m-d؛ bm_store_release_date در bot/terms.php) + متاهای _bm_release_date / _bm_release_date_jalali — و یک سطر گزارش
+ */
+function ps_apply_release_date(array &$report, $post_id, array $input) {
+    if (empty($input['pair']['g'])) {
+        return;
+    }
+    $r = bm_store_release_date($post_id, $input['pair']['g'], $input['pair']['j']);
+    ps_row($report, 'تاریخ انتشار واقعی', bm_release_date_summary($r), !empty($r['ok']) ? 'ok' : 'warn');
+}
+
 /** متاهای ثابت این نوع از config (metas) — مثل ty_content_type = video */
 function ps_type_metas(array $type) {
     $metas = [];
@@ -1168,6 +1200,10 @@ function ps_run_single() {
     if ($english_error !== '') {
         return ps_fail($report, $english_error);
     }
+    $release = ps_release_date_input();
+    if ($release['error'] !== '') {
+        return ps_fail($report, $release['error']);
+    }
     $names = ps_names($type, $artist, $song, $artist_en, $song_en);
 
     $cover = ps_source('cover_url', 'cover_file', ['image'], 'کاور');
@@ -1242,6 +1278,7 @@ function ps_run_single() {
     if (!empty($role_terms)) {
         ps_row($report, 'ژانر/حال‌وهوا/عوامل', bm_role_terms_summary($role_terms));
     }
+    ps_apply_release_date($report, $post_id, $release);
 
     $host    = ps_dl_host();
     $file320 = bm_music_file_name($names['file_base'], '320'); // «Artist - Song.mp3» (320 بدون پسوند)
@@ -1345,6 +1382,10 @@ function ps_run_video() {
     if ($english_error !== '') {
         return ps_fail($report, $english_error);
     }
+    $release = ps_release_date_input();
+    if ($release['error'] !== '') {
+        return ps_fail($report, $release['error']);
+    }
     $names = ps_names($type, $artist, $song, $artist_en, $song_en);
 
     $cover = ps_source('cover_url', 'cover_file', ['image'], 'کاور');
@@ -1416,6 +1457,7 @@ function ps_run_video() {
     ps_row($report, 'دسته‌ها', ps_apply_categories($post_id, ps_selected_categories($type)));
     $artist_result = ps_apply_artists($post_id, $terms);
     ps_row($report, 'هنرمند', $artist_result['text'], $artist_result['status']);
+    ps_apply_release_date($report, $post_id, $release);
 
     $host      = ps_dl_host();
     $meta_map  = (array) ps_cfg('video.meta', []);
@@ -1553,6 +1595,10 @@ function ps_run_album() {
     if ($english_error !== '') {
         return ps_fail($report, $english_error);
     }
+    $release = ps_release_date_input();
+    if ($release['error'] !== '') {
+        return ps_fail($report, $release['error']);
+    }
     $names = ps_names($type, $artist, $song, $artist_en, $song_en);
 
     $cover = ps_source('cover_url', 'cover_file', ['image'], 'کاور');
@@ -1609,6 +1655,7 @@ function ps_run_album() {
     ps_row($report, 'دسته‌ها', ps_apply_categories($post_id, ps_selected_categories($type)));
     $artist_result = ps_apply_artists($post_id, $terms);
     ps_row($report, 'هنرمند', $artist_result['text'], $artist_result['status']);
+    ps_apply_release_date($report, $post_id, $release);
 
     // نام پوشه‌ها و فایل‌ها روی هاست دانلود
     $host      = ps_dl_host();

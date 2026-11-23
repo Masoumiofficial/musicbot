@@ -66,6 +66,8 @@ function ps_ui_single_form($tab, array $types, array $defaults_map, array $categ
             <?php ps_ui_text('song', 'نام اثر (فارسی)', ['required' => true, 'placeholder' => 'سرنوشت']); ?>
             <?php ps_ui_text('artist_en', 'نام خواننده (انگلیسی)', ['required' => true, 'dir' => 'ltr', 'placeholder' => 'Mohsen Yeganeh', 'hint' => 'پوشه‌ی هاست دانلود و نام فایل‌ها از همین نام ساخته می‌شود']); ?>
             <?php ps_ui_text('song_en', 'نام اثر (انگلیسی)', ['required' => true, 'dir' => 'ltr', 'placeholder' => 'Sarnevesht']); ?>
+            <?php ps_ui_release_date('تاریخ انتشار واقعی اثر'); ?>
+            <div class="ps-field"></div>
         </div>
 
         <div class="ps-grid">
@@ -150,7 +152,7 @@ ps_ui_header('پست جدید');
 
         <div class="ps-grid">
             <?php ps_ui_status('publish'); ?>
-            <div class="ps-field"></div>
+            <?php ps_ui_release_date('تاریخ انتشار واقعی ویدیو'); ?>
             <?php ps_ui_text('artist', 'نام خواننده (فارسی)', ['required' => true]); ?>
             <?php ps_ui_text('song', 'نام اثر (فارسی)', ['required' => true, 'placeholder' => 'بهت قول میدم (اجرای زنده)']); ?>
             <?php ps_ui_text('artist_en', 'نام خواننده (انگلیسی)', ['required' => true, 'dir' => 'ltr']); ?>
@@ -199,7 +201,7 @@ ps_ui_header('پست جدید');
 
         <div class="ps-grid">
             <?php ps_ui_status('publish'); ?>
-            <div class="ps-field"></div>
+            <?php ps_ui_release_date('تاریخ انتشار واقعی آلبوم'); ?>
             <?php ps_ui_text('artist', 'نام خواننده (فارسی)', ['required' => true]); ?>
             <?php ps_ui_text('song', 'نام آلبوم (فارسی)', ['required' => true, 'placeholder' => 'رگ خواب']); ?>
             <?php ps_ui_text('artist_en', 'نام خواننده (انگلیسی)', ['required' => true, 'dir' => 'ltr']); ?>
