@@ -13,6 +13,8 @@ require_once __DIR__ . '/watermark.php';
 require_once __DIR__ . '/webp.php';
 // خواندن مستقیم صفحه‌ی آهنگ سایت مبدأ (به‌جای API قدیمی که صفحه‌های جدید بیاتوموزیک را نمی‌خواند؛ $bot_source_parser در config.php)
 require_once __DIR__ . '/source.php';
+// ترم‌های ژانر/حال‌وهوا/عوامل (tara_genre, tara_mood, tara_songwriter, …) + فیلد «تاریخ انتشار واقعی» قالب ($bot_release_date_* در config.php)
+require_once __DIR__ . '/terms.php';
 
 // هاست دانلود خودکار: $urldlhost خالی در config.php → AHANGBAN_DL_HOST (wp-config) یا https://dl.<دامنه‌ی سایت>؛
 // $functions_dl_music خالی → {$urldlhost}/music.php — این‌جا (بعد از wp-load) چون به home_url نیاز دارد
@@ -1805,6 +1807,22 @@ $regulator  = bm_clean_text($result['regulator'] ?? '');
 $composer   = bm_clean_text($result['composer'] ?? '');
 $matnmusic  = trim($result['matnmusic'] ?? '');
 
+// چند نفر در یک نقش (لینک‌های صفحه‌ی مبدأ): متای متنی «الف و ب» می‌شود؛ ترم‌ها جداگانه ساخته می‌شوند (bm_apply_role_terms)
+if (!empty($result['crew_links']) && is_array($result['crew_links'])) {
+    foreach (['songwriter' => 'songwriter', 'composer' => 'composer', 'regulator' => 'regulator', 'mix' => 'mix'] as $crew_key => $crew_var) {
+        $crew_names = [];
+        foreach ((array) ($result['crew_links'][$crew_key] ?? []) as $crew_person) {
+            if (is_array($crew_person) && bm_clean_text($crew_person['name'] ?? '') !== '') {
+                $crew_names[] = bm_clean_text($crew_person['name']);
+            }
+        }
+        if (count($crew_names) > 1) {
+            $$crew_var = implode(' و ', array_unique($crew_names));
+        }
+    }
+    unset($crew_key, $crew_var, $crew_names, $crew_person);
+}
+
 /* -------------------------------------------------------
  |  3) اعتبارسنجی داده‌های حیاتی
  * ------------------------------------------------------ */
@@ -2024,7 +2042,8 @@ foreach ($meta_updates as $key => $value) {
  |  9) taxonomyها
  |  به پست‌ها تگ (post_tag) داده نمی‌شود: آرشیو خواننده را taxonomy هنرمند («artist»؛ قبلاً «singer»،
  |  قابل تنظیم با $bot_artist_taxonomy؛ برای هر خواننده‌ی آهنگ یک ترم)، «دانلود آهنگ» را دسته‌بندی و
- |  سبک/حال‌وهوا را «genre» و «mood» پوشش می‌دهند.
+ |  ژانر/حال‌وهوا/ترانه‌سرا/آهنگساز/تنظیم‌کننده را تاکسونومی‌های قالب (tara_genre, tara_mood, tara_songwriter,
+ |  tara_composer, tara_arranger — bot/terms.php) پوشش می‌دهند.
  |  تگ فقط صفحه‌های آرشیو تکراری یا تک‌پستی می‌سازد که برای سئو ضرر دارد.
  * ------------------------------------------------------ */
 
@@ -2061,8 +2080,14 @@ if ($artist_taxonomy !== '') {
         wp_set_object_terms($post_id, $artist_term_ids, $artist_taxonomy, false);
     }
 }
-bm_set_term_if_not_empty($post_id, $mood, 'mood', false);
-bm_set_term_if_not_empty($post_id, $style, 'genre', false);
+// ژانر، حال‌وهوا و عوامل → ترم‌های قالب (نام‌ها طبق $bot_mood_term_names / پیشوند $bot_*_term_prefix؛ نامک انگلیسی از لینک‌های مبدأ)
+$bm_role_terms = bm_apply_role_terms($post_id, array_merge(is_array($result) ? $result : [], [
+    'mood'       => $mood,
+    'style'      => $style,
+    'songwriter' => $songwriter,
+    'composer'   => $composer,
+    'regulator'  => $regulator,
+]));
 
 /* -------------------------------------------------------
  |  10) ساخت لینک فایل‌های دانلود روی هاست خودت
@@ -2125,6 +2150,9 @@ if (!empty($publisher))  update_post_meta($post_id, 'publisher', $publisher);
 // سبک و مود
 if (!empty($style))      update_post_meta($post_id, 'genre', $style);
 if (!empty($mood))       update_post_meta($post_id, 'mood', $mood);
+
+// تاریخ انتشار واقعی آهنگ (JSON-LD مبدأ + «تاریخ انتشار: 1405/08/30» صفحه) → فیلد قالب + متاهای _bm_release_date / _bm_release_date_jalali
+$bm_release = bm_store_release_date($post_id, (string) ($result['date'] ?? ''), (string) ($result['date_jalali'] ?? ''));
 
 /* -------------------------------------------------------
  |  11-1) همگام‌سازی با ACF (فقط اگر افزونه فعال باشد)
@@ -2278,6 +2306,9 @@ if ($artist_taxonomy === '') {
         . (count($artist_report) > 1 ? '، ' . count($artist_report) . ' هنرمند جدا' : '') . '<br>';
 }
 
+echo 'تاریخ انتشار: ' . esc_html(bm_release_date_summary($bm_release)) . '<br>';
+echo 'ژانر/حال‌وهوا/عوامل: ' . (!empty($bm_role_terms) ? esc_html(bm_role_terms_summary($bm_role_terms)) : 'در مبدأ نبود') . '<br>';
+
 if (is_array($download_info)) {
     echo 'پوشه هاست دانلود: ' . esc_html($dl_dir) . '<br>';
     if ($download_info['ok']) {
@@ -2303,4 +2334,6 @@ echo bm_result_marker('ok', [
     'download_error' => is_array($download_info) && !$download_usable ? $download_info['summary'] : '',
     'download_note'  => $download_partial ? 'انتقال ناقص: ' . $download_label . ' روی هاست دانلود نشست و پست با همان منتشر شد — ' . $download_info['summary'] : '',
     'note'      => trim($bm_same_title_note . ($bm_artist_note !== '' ? ($bm_same_title_note !== '' ? '؛ ' : '') . $bm_artist_note : '')),
+    'release_date' => $bm_release['gregorian'],
+    'terms'     => !empty($bm_role_terms) ? bm_role_terms_summary($bm_role_terms) : '',
 ]);

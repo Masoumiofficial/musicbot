@@ -335,11 +335,25 @@ function bm_source_parse($html, $url = '') {
         'guitar'     => bm_source_labelled($body, ['نوازنده گیتار', 'گیتار']),
         'publisher'  => bm_source_labelled($body, ['ناشر', 'انتشارات']),
     ];
+    // نامک‌های ژانر/حال‌وهوا (/genre/pop ، /mood/happy) و لینک صفحه‌ی هر یک از عوامل (/artists/{slug}) — برای ترم‌های سایت
+    $genre_slug = bm_source_taxonomy_slug($body, 'genre');
+    $mood_slug  = bm_source_taxonomy_slug($body, 'mood');
+    $crew_links = [
+        'songwriter' => bm_source_labelled_links($body, ['ترانه سرا', 'ترانه‌سرا', 'شاعر']),
+        'composer'   => bm_source_labelled_links($body, ['آهنگساز']),
+        'regulator'  => bm_source_labelled_links($body, ['تنظیم کننده', 'تنظیم‌کننده', 'تنظیم']),
+        'mix'        => bm_source_labelled_links($body, ['میکس و مستر', 'میکس و مسترینگ', 'میکس']),
+    ];
 
     /* --- متن ترانه --- */
     $lyrics = $kind === 'music' ? bm_source_lyrics($body, $song) : '';
 
-    $date = isset($main['datePublished']) && is_string($main['datePublished']) ? $main['datePublished'] : '';
+    /* --- تاریخ انتشار: JSON-LD (میلادی) + «تاریخ انتشار: 1405/08/30» صفحه (شمسی) --- */
+    $date = isset($main['datePublished']) && is_string($main['datePublished']) ? trim($main['datePublished']) : '';
+    if ($date === '') {
+        $date = bm_source_meta($html, 'property', 'article:published_time');
+    }
+    $date_jalali = bm_source_jalali_date($body);
 
     if ($song === '' || $artist === '') {
         $out['error'] = 'نام آهنگ یا خواننده در صفحه پیدا نشد'
@@ -369,6 +383,10 @@ function bm_source_parse($html, $url = '') {
         'matnmusic'    => $lyrics,
         'kind'         => $kind,
         'date'         => $date,
+        'date_jalali'  => $date_jalali,
+        'genre_slug'   => $genre_slug,
+        'mood_slug'    => $mood_slug,
+        'crew_links'   => $crew_links,
         'source'       => 'page',
     ];
     if ($ld['type'] === '') {
@@ -682,6 +700,77 @@ function bm_source_after_label($body, array $labels) {
         }
     }
     return bm_source_labelled($body, $labels);
+}
+
+/**
+ * همه‌ی لینک‌های عوامل بعد از یک برچسب: <a href="/artists/mehdi-hariji">ترانه سرا مهدی هریجی</a>
+ * (در سایت مبدأ برچسب و نام داخل یک لینک‌اند؛ اگر چند نفر باشند هر کدام لینک خودش را دارد)
+ * خروجی: [['name' => 'مهدی هریجی', 'slug' => 'mehdi-hariji'], …] بدون تکرار؛ اگر لینکی نبود آرایه‌ی خالی
+ */
+function bm_source_labelled_links($body, array $labels) {
+    static $anchors = null, $anchors_for = null;
+    if ($anchors_for !== $body) {
+        $anchors_for = $body;
+        $anchors     = [];
+        if (preg_match_all('#<a\b[^>]*\bhref=(["\'])([^"\']*?/artists?/([^"\'/?\#]+))/?\1[^>]*>(.*?)</a>#isu', $body, $all, PREG_SET_ORDER)) {
+            foreach ($all as $a) {
+                // تگ‌ها → فاصله تا «<span>ترانه سرا</span><span>مهدی هریجی</span>» به «ترانه سرا مهدی هریجی» تبدیل شود
+                $anchors[] = ['slug' => rawurldecode($a[3]), 'text' => bm_source_text(preg_replace('#<[^>]+>#', ' ', $a[4]))];
+            }
+        }
+    }
+    $out = [];
+    foreach ($labels as $label) {
+        $pattern = '#^' . bm_source_label_regex($label) . '(?![\p{L}])\s*[:،]?\s*(.{1,80})$#iu';
+        foreach ($anchors as $anchor) {
+            if ($anchor['text'] === '' || !preg_match($pattern, $anchor['text'], $m)) {
+                continue;
+            }
+            $name = trim((string) preg_replace('/^[\s:،,\-–]+|[\s:،,\-–]+$/u', '', $m[1]));
+            if ($name === '' || preg_match('/^(?:و|کننده|سرا)(?:\s|$)/u', $name)) {
+                continue; // برچسب کوتاه وسط برچسب بلندتر («میکس» در «میکس و مستر»)
+            }
+            $key = $anchor['slug'] !== '' ? strtolower($anchor['slug']) : $name;
+            if (!isset($out[$key])) {
+                $out[$key] = ['name' => $name, 'slug' => strtolower($anchor['slug'])];
+            }
+        }
+        if (!empty($out)) {
+            break; // نام‌های همین برچسب کافی است («تنظیم کننده» پیدا شد → سراغ «تنظیم» نمی‌رویم)
+        }
+    }
+    return array_values($out);
+}
+
+/** نامک ژانر/حال‌وهوا از لینک صفحه (/genre/pop ، /mood/happy) — برای نامک انگلیسی ترم‌های سایت */
+function bm_source_taxonomy_slug($body, $kind) {
+    $kind = preg_quote((string) $kind, '#');
+    if (preg_match('#\bhref=(["\'])[^"\']*?/' . $kind . '/([a-z0-9][a-z0-9_\-]*)/?(?:[?\#][^"\']*)?\1#iu', $body, $m)) {
+        return strtolower($m[2]);
+    }
+    return '';
+}
+
+/**
+ * «تاریخ انتشار: 1405/08/30» صفحه → «1405/08/30» (ارقام فارسی هم پذیرفته می‌شود)؛ اگر نبود رشته‌ی خالی
+ * فقط تاریخ شمسی برمی‌گردد؛ تاریخ میلادی JSON-LD جداگانه در «date» است.
+ */
+function bm_source_jalali_date($body) {
+    if (!preg_match_all('/تاریخ[\s\x{200C}]*انتشار\s*(?:<[^>]*>\s*)*[:：]?\s*(?:<[^>]*>\s*)*([0-9۰-۹٠-٩]{4}\s*[\/\-.]\s*[0-9۰-۹٠-٩]{1,2}\s*[\/\-.]\s*[0-9۰-۹٠-٩]{1,2})/u', $body, $all)) {
+        return '';
+    }
+    foreach ($all[1] as $raw) {
+        $digits = bm_source_latin_digits($raw);
+        if (preg_match('/^(\d{4})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{1,2})$/', $digits, $m)) {
+            $y = (int) $m[1];
+            $mo = (int) $m[2];
+            $d = (int) $m[3];
+            if ($y >= 1300 && $y <= 1499 && $mo >= 1 && $mo <= 12 && $d >= 1 && $d <= 31) {
+                return sprintf('%04d/%02d/%02d', $y, $mo, $d);
+            }
+        }
+    }
+    return '';
 }
 
 /** خط‌های متنی صفحه (عنصرهای بلوکی و <br> = خط جدید؛ خط‌های خالی حذف) */

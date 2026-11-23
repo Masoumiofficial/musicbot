@@ -1231,8 +1231,17 @@ function ps_run_single() {
     ps_row($report, 'دسته‌ها', ps_apply_categories($post_id, ps_selected_categories($type)));
     $artist_result = ps_apply_artists($post_id, $terms);
     ps_row($report, 'هنرمند', $artist_result['text'], $artist_result['status']);
-    bm_set_term_if_not_empty($post_id, $mood, 'mood', false);
-    bm_set_term_if_not_empty($post_id, $genre, 'genre', false);
+    // ژانر/حال‌وهوا/عوامل → تاکسونومی‌های قالب (tara_genre, tara_mood, tara_songwriter, …؛ bot/terms.php — نام‌ها طبق config ربات)
+    $role_terms = bm_apply_role_terms($post_id, [
+        'mood'     => $mood,
+        'style'    => $genre,
+        'lyricist' => $crew['lyricist'],
+        'composer' => $crew['composer'],
+        'arranger' => $crew['arranger'],
+    ]);
+    if (!empty($role_terms)) {
+        ps_row($report, 'ژانر/حال‌وهوا/عوامل', bm_role_terms_summary($role_terms));
+    }
 
     $host    = ps_dl_host();
     $file320 = bm_music_file_name($names['file_base'], '320'); // «Artist - Song.mp3» (320 بدون پسوند)

@@ -478,6 +478,7 @@ ol li{margin-bottom:6px}
     <a class="btn gray" href="dl-repair.php">ترمیم هاست دانلود</a>
     <a class="btn gray" href="webp-batch.php">WebP کاورها</a>
     <a class="btn gray" href="watermark-batch.php">لوگو روی کاورها</a>
+    <a class="btn gray" href="backfill.php">تکمیل پست‌های قبلی</a>
     <a class="btn gray" href="meta-compare.php">مقایسه‌ی متاها</a>
   </div>
   <p class="muted" style="margin:0"><small>
