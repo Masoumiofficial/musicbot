@@ -8,10 +8,13 @@
  *
  *   bm_apply_role_terms($post_id, $data)      ترم‌های همه‌ی نقش‌ها از داده‌ی مبدأ (خروجی bm_fetch_source) یا متاهای پست
  *   bm_store_release_date($post_id, $g, $j)   تاریخ انتشار واقعی آهنگ در فیلد قالب (+ متاهای _bm_release_date / _bm_release_date_jalali)
- *   bm_release_date_field()                   فیلد تاریخ انتشار قالب: $bot_release_date_field در config.php، وگرنه جست‌وجوی خودکار
- *                                             بین فیلدهای ACF نوشته‌ها (نام/برچسب شامل «تاریخ انتشار» یا release/publish date)
+ *   bm_release_date_field()                   فیلد تاریخ انتشار قالب: $bot_release_date_field در config.php؛ وگرنه جعبه‌ی «تاریخ انتشار
+ *                                             واقعی آهنگ» قالب ترانه‌یار (inc/tara-release-date.php ۳.۱۷+: متای _tara_release_date،
+ *                                             میلادی Y-m-d — کلید از tara_p1_date_meta_key / tara_release_meta_keys خود قالب)؛
+ *                                             وگرنه جست‌وجوی خودکار بین فیلدهای ACF نوشته‌ها (نام/برچسب «تاریخ انتشار»، release/publish date)
  *   bm_release_date_format($field)            قالب ذخیره: $bot_release_date_format = auto | jalali | gregorian | acf
- *                                             auto = فیلد تاریخ ACF → Ymd میلادی (همان قالب داخلی ACF)، فیلد متنی → شمسی 1405/08/30
+ *                                             فیلد قالب ترانه‌یار همیشه Y-m-d میلادی (قالب فقط همین را می‌خواند؛ ورودی شمسی جعبه را
+ *                                             خودش به همین تبدیل می‌کند)؛ auto برای ACF = فیلد تاریخ → Ymd، فیلد متنی → شمسی 1405/08/30
  *
  * نام ترم‌ها (config.php):
  *   $bot_mood_term_names  = ['ریتمیک' => 'شاد'];   نگاشت نام مبدأ → نام سایت (قبل از پیشوند)
@@ -368,11 +371,48 @@ function bm_acf_post_fields($post_id = 0) {
 }
 
 /**
- * فیلد «تاریخ انتشار واقعی» قالب
- *   $bot_release_date_field (config.php) = نام فیلد (meta key): اگر فیلد ACF با این نام باشد با همان کلید/نوع، وگرنه متای ساده‌ی متنی
- *   خالی = جست‌وجوی خودکار بین فیلدهای ACF نوشته‌ها: نام/برچسب شامل «تاریخ انتشار» یا release/publish date (امتیاز ۳)،
- *          «انتشار»/release (۲)، فیلد تاریخ (date_picker) یا نام شامل date/تاریخ (۱)؛ فیلد تاریخ نیم‌امتیاز اضافه می‌گیرد.
- * خروجی: ['name', 'key', 'type', 'label', 'source' => 'config' | 'acf' | 'meta'] یا null (پیدا نشد)
+ * کلید متای «تاریخ انتشار واقعی آهنگ» قالب ترانه‌یار (جعبه‌ی کنار ویرایشگر؛ inc/tara-release-date.php نسخه‌ی ۳.۱۷+)
+ * قالب خودش همیشه میلادی Y-m-d ذخیره می‌کند (ورودی شمسی را همان‌جا تبدیل می‌کند) و موقع خواندن (tara_release_meta_date)
+ * فقط Y-m-d / Y/m/d میلادی را می‌پذیرد؛ پس ربات هم همان کلید و همان قالب را می‌نویسد.
+ *   tara_p1_date_meta_key()   → کلید جعبه (پیش‌فرض _tara_release_date؛ با فیلتر قابل تغییر)      ۳.۱۷+
+ *   tara_release_meta_keys()  → کلیدهایی که قالب می‌خواند (_tara_release_date, release_date, …)  ۳.۱۶+
+ *   قالب ترانه‌یار فعال ولی هیچ‌کدام از توابع نبود (نسخه‌ی قدیمی‌تر) → همان _tara_release_date تا بعد از به‌روزرسانی قالب دیده شود
+ * خروجی: کلید متا یا '' (قالب دیگری است)
+ */
+function bm_theme_release_date_key() {
+    static $key = null;
+    if ($key !== null) {
+        return $key;
+    }
+    $key = '';
+    if (function_exists('tara_p1_date_meta_key')) {
+        $key = trim((string) tara_p1_date_meta_key());
+    }
+    if ($key === '' && function_exists('tara_release_meta_keys')) {
+        foreach ((array) tara_release_meta_keys() as $candidate) {
+            if (trim((string) $candidate) !== '') {
+                $key = trim((string) $candidate);
+                break;
+            }
+        }
+    }
+    if ($key === '' && function_exists('wp_get_theme')) {
+        $theme = wp_get_theme();
+        $hay   = mb_strtolower(implode(' ', [(string) $theme->get('Name'), (string) $theme->get('TextDomain'), (string) $theme->get_template(), (string) $theme->get_stylesheet()]), 'UTF-8');
+        if (strpos($hay, 'taranehyar') !== false || strpos($hay, 'tarane') !== false || strpos($hay, 'ترانه') !== false) {
+            $key = '_tara_release_date';
+        }
+    }
+    return $key;
+}
+
+/**
+ * فیلد «تاریخ انتشار واقعی» قالب — به ترتیب:
+ *   1) $bot_release_date_field (config.php): نام/کلید فیلد ACF با این نام → همان فیلد؛ وگرنه متای ساده با همین کلید
+ *   2) قالب ترانه‌یار: متای جعبه‌ی «تاریخ انتشار واقعی آهنگ» (bm_theme_release_date_key — _tara_release_date، میلادی Y-m-d)
+ *   3) جست‌وجوی خودکار بین فیلدهای ACF نوشته‌ها: نام/برچسب شامل «تاریخ انتشار» یا release/publish date (امتیاز ۳)،
+ *      «انتشار»/release (۲)، فیلد تاریخ (date_picker) یا نام شامل date/تاریخ (۱)؛ فیلد تاریخ نیم‌امتیاز اضافه می‌گیرد.
+ * خروجی: ['name', 'key' (کلید ACF یا ''), 'type' ('meta' = متای ساده)، 'label', 'source' => 'config' | 'theme' | 'acf'] یا null
  */
 function bm_release_date_field($post_id = 0) {
     static $cache = [];
@@ -381,19 +421,26 @@ function bm_release_date_field($post_id = 0) {
         return $cache[$post_id];
     }
     $configured = isset($GLOBALS['bot_release_date_field']) ? trim((string) $GLOBALS['bot_release_date_field']) : '';
+    if ($configured !== '') {
+        foreach (bm_acf_post_fields($post_id) as $field) {
+            if ((string) $field['name'] === $configured || (string) $field['key'] === $configured) {
+                return $cache[$post_id] = ['name' => (string) $field['name'], 'key' => (string) $field['key'], 'type' => isset($field['type']) ? (string) $field['type'] : 'text', 'label' => isset($field['label']) ? (string) $field['label'] : '', 'source' => 'config'];
+            }
+        }
+        return $cache[$post_id] = ['name' => $configured, 'key' => '', 'type' => 'meta', 'label' => $configured, 'source' => 'config'];
+    }
+
+    $theme_key = bm_theme_release_date_key();
+    if ($theme_key !== '') {
+        return $cache[$post_id] = ['name' => $theme_key, 'key' => '', 'type' => 'meta', 'label' => 'تاریخ انتشار واقعی آهنگ', 'source' => 'theme'];
+    }
+
     $best       = null;
     $best_score = 0;
     foreach (bm_acf_post_fields($post_id) as $field) {
         $name  = (string) $field['name'];
         $type  = isset($field['type']) ? (string) $field['type'] : '';
         $label = isset($field['label']) ? (string) $field['label'] : '';
-        if ($configured !== '') {
-            if ($name === $configured) {
-                $best = ['name' => $name, 'key' => (string) $field['key'], 'type' => $type, 'label' => $label, 'source' => 'config'];
-                break;
-            }
-            continue;
-        }
         if (in_array($type, ['repeater', 'group', 'flexible_content', 'clone', 'tab', 'accordion', 'message', 'taxonomy', 'image', 'file', 'url', 'true_false', 'relationship', 'post_object', 'gallery'], true)) {
             continue;
         }
@@ -414,11 +461,8 @@ function bm_release_date_field($post_id = 0) {
             $best       = ['name' => $name, 'key' => (string) $field['key'], 'type' => $type, 'label' => $label, 'source' => 'acf'];
         }
     }
-    if ($configured === '' && $best !== null && $best_score < 1.5) {
+    if ($best !== null && $best_score < 1.5) {
         $best = null; // فقط «date» ساده بدون نشانه‌ی انتشار: مطمئن نیستیم
-    }
-    if ($best === null && $configured !== '') {
-        $best = ['name' => $configured, 'key' => '', 'type' => 'text', 'label' => $configured, 'source' => 'meta'];
     }
     return $cache[$post_id] = $best;
 }
@@ -428,16 +472,23 @@ function bm_release_date_field($post_id = 0) {
  * $bot_release_date_format (config.php): auto | jalali | gregorian | acf
  */
 function bm_release_date_format($field = null) {
-    $cfg = isset($GLOBALS['bot_release_date_format']) ? strtolower(trim((string) $GLOBALS['bot_release_date_format'])) : 'auto';
+    $cfg    = isset($GLOBALS['bot_release_date_format']) ? strtolower(trim((string) $GLOBALS['bot_release_date_format'])) : 'auto';
+    $source = is_array($field) && isset($field['source']) ? (string) $field['source'] : '';
+    $type   = is_array($field) && isset($field['type']) ? (string) $field['type'] : '';
+    if ($source === 'theme') {
+        return 'gregorian'; // قالب ترانه‌یار فقط Y-m-d میلادی را می‌خواند (ورودی شمسی را خودش به همین تبدیل می‌کند)
+    }
     if ($cfg === 'jalali' || $cfg === 'gregorian') {
         return $cfg;
     }
-    $type = is_array($field) && isset($field['type']) ? (string) $field['type'] : '';
     if ($type === 'date_time_picker') {
         return 'Y-m-d H:i:s';
     }
     if ($type === 'date_picker' || $cfg === 'acf') {
         return 'Ymd';
+    }
+    if ($type === 'meta') {
+        return 'gregorian'; // متای ساده: ماشین‌خوان (Y-m-d)؛ برای شمسی $bot_release_date_format = 'jalali'
     }
     return 'jalali';
 }
@@ -607,7 +658,17 @@ function bm_release_date_current($post_id, $field = null) {
     if (!is_array($field)) {
         return '';
     }
+    if ($field['source'] === 'theme' && function_exists('tara_release_meta_date')) {
+        // همان چیزی که قالب نشان می‌دهد (هر کدام از کلیدهای قالب؛ فقط تاریخ میلادی معتبر)
+        $seen = tara_release_meta_date($post_id);
+        if (is_string($seen) && $seen !== '') {
+            return $seen;
+        }
+    }
     $value = get_post_meta($post_id, $field['name'], true);
+    if (is_array($value)) {
+        $value = isset($value['date']) ? $value['date'] : '';
+    }
     return is_scalar($value) ? trim((string) $value) : '';
 }
 
@@ -619,7 +680,7 @@ function bm_release_date_current($post_id, $field = null) {
  */
 function bm_store_release_date($post_id, $gregorian, $jalali = '', $overwrite = true) {
     $pair = bm_release_date_pair($gregorian, $jalali);
-    $out  = ['ok' => false, 'field' => '', 'value' => '', 'format' => '', 'gregorian' => $pair['g'], 'jalali' => $pair['j'], 'note' => ''];
+    $out  = ['ok' => false, 'field' => '', 'source' => '', 'value' => '', 'format' => '', 'gregorian' => $pair['g'], 'jalali' => $pair['j'], 'note' => ''];
     if ($pair['g'] === '') {
         $out['note'] = 'تاریخ انتشار در مبدأ پیدا نشد';
         return $out;
@@ -633,6 +694,7 @@ function bm_store_release_date($post_id, $gregorian, $jalali = '', $overwrite = 
         return $out;
     }
     $out['field']  = $field['name'];
+    $out['source'] = $field['source'];
     $out['format'] = bm_release_date_format($field);
     if (!$overwrite) {
         $current = bm_release_date_current($post_id, $field);
@@ -661,7 +723,8 @@ function bm_release_date_summary(array $r) {
     }
     $text = $r['jalali'] . ' (' . $r['gregorian'] . ')';
     if ($r['field'] !== '') {
-        $text .= ' → فیلد ' . $r['field'] . ' = ' . $r['value'] . ' [' . bm_release_date_format_label($r['format']) . ']';
+        $what = (isset($r['source']) && $r['source'] === 'theme') ? 'فیلد قالب «تاریخ انتشار واقعی آهنگ» ' : 'فیلد ';
+        $text .= ' → ' . $what . $r['field'] . ' = ' . $r['value'] . ' [' . bm_release_date_format_label($r['format']) . ']';
     }
     if ($r['note'] !== '') {
         $text .= ' — ' . $r['note'];

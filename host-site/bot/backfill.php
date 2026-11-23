@@ -16,7 +16,9 @@
  *   2) اگر تاریخ انتشار یا ترمی هنوز کم بود: صفحه‌ی مبدأ (mybia2music) خوانده می‌شود — لینک از متای _bm_source_url، جدول
  *      wp_subcheck (ارسال خودکار قدیمی)، لینکی که خودتان در ستون «لینک مبدأ» می‌نویسید، یا جست‌وجو در فهرست آهنگ‌های همان
  *      خواننده در سایت مبدأ (/artists/{slug}/musics و صفحه‌های بعدی) با تطبیق نام آهنگ. لینک پیداشده در _bm_source_url ذخیره می‌شود.
- *   3) تاریخ: فیلد قالب (bm_release_date_field — $bot_release_date_field در config.php) + متاهای _bm_release_date / _bm_release_date_jalali
+ *   3) تاریخ: فیلد قالب (bm_release_date_field: جعبه‌ی «تاریخ انتشار واقعی آهنگ» ترانه‌یار = متای _tara_release_date میلادی Y-m-d؛
+ *      یا $bot_release_date_field در config.php) + متاهای _bm_release_date / _bm_release_date_jalali
+ *      ?fixdate=1 : فقط پست‌هایی که تاریخ در متای ربات هست ولی فیلد قالب خالی است (بدون خواندن مبدأ پر می‌شود)
  *      ترم‌ها: فقط نقش‌هایی که پست هنوز ترمی در آن تاکسونومی ندارد (چیزی که از پیشخوان تنظیم شده دست نمی‌خورد)
  *      متاهای متنی خالی (genre/mood/lyricist/composer/arranger) هم از مبدأ پر می‌شوند
  *   نتیجه در متای _bm_backfill ذخیره می‌شود تا پست دوباره در فهرست نیاید (retry=1 = پست‌های ناقص دوباره).
@@ -41,6 +43,7 @@ $bf_limit  = isset($_GET['limit']) ? max(1, min(100, (int) $_GET['limit'])) : 20
 $bf_before = isset($_GET['before']) ? max(0, (int) $_GET['before']) : 0;
 $bf_status = (isset($_GET['status']) && $_GET['status'] === 'any') ? ['publish', 'draft', 'pending', 'future', 'private'] : ['publish'];
 $bf_retry  = !empty($_GET['retry']);
+$bf_fixdate = !empty($_GET['fixdate']); // فقط تاریخ: پست‌هایی که تاریخ در متای ربات (_bm_release_date) هست ولی فیلد قالب خالی است
 $bf_dry    = !empty($_GET['dry']);
 $bf_auto   = !empty($_GET['auto']);
 $bf_run    = !empty($_GET['run']);
@@ -226,7 +229,8 @@ function bf_state($post_id) {
         }
         $state['terms'][$role] = ['taxonomy' => $taxonomy, 'names' => $names];
     }
-    $state['has_date'] = $state['date_field'] !== '' || $state['date_meta'] !== '';
+    // تاریخ وقتی «هست» که فیلد قالب پر باشد؛ متای ربات (_bm_release_date) به‌تنهایی فقط وقتی کافی است که قالب فیلدی نداشته باشد
+    $state['has_date'] = is_array($field) ? $state['date_field'] !== '' : $state['date_meta'] !== '';
     return $state;
 }
 
@@ -317,6 +321,26 @@ function bf_process($post_id, $manual_source, $dry, $max_pages) {
             $out['lines'][] = 'از متای پست — ' . bm_role_terms_summary($report);
         }
         $need['roles'] = array_values(array_diff($need['roles'], $out['filled']));
+    }
+
+    /* --- 1-ب) تاریخ از متای خود ربات (پست‌هایی که ربات قبلاً _bm_release_date را نوشته ولی فیلد قالب آن موقع پیدا نشده بود) --- */
+    if ($need['date'] && $state['date_meta'] !== '') {
+        $pair = bm_release_date_pair($state['date_meta'], $state['date_jalali']);
+        if ($pair['g'] !== '') {
+            if ($dry) {
+                $field = $state['field'];
+                $out['lines'][] = 'تاریخ انتشار از متای ربات (_bm_release_date): ' . $pair['j'] . ' (' . $pair['g'] . ')' . (is_array($field) ? ' → فیلد ' . $field['name'] . ' = ' . bm_release_date_value($pair, bm_release_date_format($field)) : '') . ' (پیش‌نمایش)';
+                $out['filled'][] = 'date';
+                $need['date'] = false;
+            } else {
+                $r = bm_store_release_date($post_id, $pair['g'], $pair['j'], false);
+                if ($r['ok']) {
+                    $out['lines'][] = 'تاریخ انتشار از متای ربات (_bm_release_date): ' . bm_release_date_summary($r);
+                    $out['filled'][] = 'date';
+                    $need['date'] = false;
+                }
+            }
+        }
     }
 
     /* --- 2) مبدأ --- */
@@ -462,7 +486,7 @@ function bf_item_label($item) {
  * ------------------------------------------------------ */
 
 /** شناسه‌ی پست‌های نوبت بعد (جدیدترین اول؛ ID < $before) */
-function bf_candidates(array $statuses, $limit, $before, $retry) {
+function bf_candidates(array $statuses, $limit, $before, $retry, $fixdate = false) {
     global $wpdb;
     $holders = implode(',', array_fill(0, count($statuses), '%s'));
     $args    = $statuses;
@@ -471,7 +495,16 @@ function bf_candidates(array $statuses, $limit, $before, $retry) {
         $where .= ' AND p.ID < %d';
         $args[] = $before;
     }
-    if ($retry) {
+    if ($fixdate) {
+        $field = bm_release_date_field();
+        if (!is_array($field)) {
+            return [];
+        }
+        // تاریخ در متای ربات هست ولی فیلد قالب خالی است (بدون توجه به _bm_backfill)
+        $where .= " AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id = p.ID AND m.meta_key = '_bm_release_date' AND m.meta_value <> '')"
+            . " AND NOT EXISTS (SELECT 1 FROM {$wpdb->postmeta} f WHERE f.post_id = p.ID AND f.meta_key = %s AND f.meta_value <> '')";
+        $args[] = $field['name'];
+    } elseif ($retry) {
         $where .= " AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id = p.ID AND m.meta_key = '_bm_backfill' AND m.meta_value LIKE %s)";
         $args[] = '%"missing":["%';
     } else {
@@ -488,19 +521,26 @@ function bf_counts(array $statuses) {
     $total   = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} p WHERE p.post_type = 'post' AND p.post_status IN ($holders)", $statuses));
     $pending = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} p WHERE p.post_type = 'post' AND p.post_status IN ($holders) AND NOT EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id = p.ID AND m.meta_key = '_bm_backfill')", $statuses));
     $partial = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} p WHERE p.post_type = 'post' AND p.post_status IN ($holders) AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id = p.ID AND m.meta_key = '_bm_backfill' AND m.meta_value LIKE %s)", array_merge($statuses, ['%"missing":["%'])));
-    return [$total, $pending, $partial];
+    $fixdate = 0;
+    $field   = bm_release_date_field();
+    if (is_array($field)) {
+        $fixdate = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} p WHERE p.post_type = 'post' AND p.post_status IN ($holders)"
+            . " AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id = p.ID AND m.meta_key = '_bm_release_date' AND m.meta_value <> '')"
+            . " AND NOT EXISTS (SELECT 1 FROM {$wpdb->postmeta} f WHERE f.post_id = p.ID AND f.meta_key = %s AND f.meta_value <> '')", array_merge($statuses, [$field['name']])));
+    }
+    return [$total, $pending, $partial, $fixdate];
 }
 
 $self      = esc_url(remove_query_arg(['run', 'auto', 'dry', 'before', 'ids']));
 $base_args = [];
-foreach (['limit', 'status', 'retry', 'pages'] as $keep) {
+foreach (['limit', 'status', 'retry', 'fixdate', 'pages'] as $keep) {
     if (isset($_GET[$keep]) && $_GET[$keep] !== '') {
         $base_args[$keep] = (string) $_GET[$keep];
     }
 }
 $field  = bm_release_date_field();
 $format = bm_release_date_format($field);
-list($count_total, $count_pending, $count_partial) = bf_counts($bf_status);
+list($count_total, $count_pending, $count_partial, $count_fixdate) = bf_counts($bf_status);
 ?><!doctype html>
 <html lang="fa" dir="rtl">
 <head>
@@ -531,10 +571,17 @@ ul.report{margin:4px 0 0 0;padding-right:18px}
         if (is_array($field)) {
             echo '<code>' . bf_h($field['name']) . '</code>';
             echo $field['label'] !== '' && $field['label'] !== $field['name'] ? ' («' . bf_h($field['label']) . '»)' : '';
-            echo ' — نوع <code>' . bf_h($field['type']) . '</code>';
-            echo $field['key'] !== '' ? ' <small class="muted">' . bf_h($field['key']) . '</small>' : '';
-            echo ' — ' . ($field['source'] === 'config' ? 'از config.php' : ($field['source'] === 'acf' ? 'تشخیص خودکار از فیلدهای ACF' : 'متای ساده (config.php؛ فیلد ACF با این نام نیست)'));
-            echo '<br>قالب ذخیره: <b>' . bf_h(bm_release_date_format_label($format)) . '</b> <small class="muted">($bot_release_date_format = ' . bf_h(isset($bot_release_date_format) ? $bot_release_date_format : 'auto') . ')</small>';
+            if ($field['source'] === 'theme') {
+                echo ' — متای جعبه‌ی «تاریخ انتشار واقعی آهنگ» قالب ترانه‌یار (کنار ویرایشگر نوشته)' . (function_exists('tara_p1_date_meta_key') ? '' : (function_exists('tara_release_meta_keys') ? ' <small class="warn">قالب ۳.۱۶ (جعبه‌ی ویرایش از ۳.۱۷ اضافه شده؛ همین کلید خوانده می‌شود)</small>' : ' <small class="warn">توابع قالب در دسترس نبود؛ کلید استاندارد قالب نوشته می‌شود و بعد از به‌روزرسانی قالب دیده می‌شود</small>'));
+            } else {
+                echo ' — نوع <code>' . bf_h($field['type']) . '</code>';
+                echo $field['key'] !== '' ? ' <small class="muted">' . bf_h($field['key']) . '</small>' : '';
+                echo ' — ' . ($field['source'] === 'config' ? ($field['key'] !== '' ? 'فیلد ACF (از config.php)' : 'متای ساده (از config.php)') : 'تشخیص خودکار از فیلدهای ACF');
+            }
+            echo '<br>قالب ذخیره: <b>' . bf_h(bm_release_date_format_label($format)) . '</b> <small class="muted">($bot_release_date_format = ' . bf_h(isset($bot_release_date_format) ? $bot_release_date_format : 'auto') . ($field['source'] === 'theme' ? '؛ برای فیلد قالب همیشه میلادی Y-m-d — قالب فقط همین را می‌خواند' : '') . ')</small>';
+            if ($count_fixdate > 0) {
+                echo '<br><span class="warn">' . (int) $count_fixdate . ' پست</span> تاریخ را فقط در متای ربات دارند (فیلد قالب خالی است) → <a href="' . esc_url(add_query_arg(array_merge($base_args, ['fixdate' => 1, 'run' => 1, 'auto' => 1]), $self)) . '"><b>انتقال به فیلد قالب (بدون خواندن مبدأ)</b></a> <small class="muted">یا <a href="' . esc_url(add_query_arg(array_merge($base_args, ['fixdate' => 1]), $self)) . '">فهرست‌شان</a></small>';
+            }
         } else {
             echo '<span class="bad">پیدا نشد</span> — تاریخ فقط در متاهای <code>_bm_release_date</code> / <code>_bm_release_date_jalali</code> ذخیره می‌شود. نام فیلد را در config.php بدهید: <code>$bot_release_date_field</code>.';
             $all_fields = bm_acf_post_fields();
@@ -568,7 +615,8 @@ ul.report{margin:4px 0 0 0;padding-right:18px}
     <a class="btn" href="<?php echo esc_url(add_query_arg(array_merge($base_args, ['run' => 1, 'auto' => 1]), $self)); ?>" onclick="return confirm('پست‌های بررسی‌نشده دسته‌به‌دسته (هر دسته <?php echo (int) $bf_limit; ?> پست) پردازش می‌شوند و صفحه خودش ادامه می‌دهد. برای توقف صفحه را ببندید یا «توقف» را بزنید. ادامه می‌دهید؟');">پردازش خودکار همه</a>
     <a class="btn gray" href="<?php echo esc_url(add_query_arg(array_merge($base_args, ['run' => 1]), $self)); ?>">پردازش یک دسته</a>
     <a class="btn gray" href="<?php echo esc_url(add_query_arg(array_merge($base_args, ['run' => 1, 'dry' => 1]), $self)); ?>">پیش‌نمایش یک دسته (بدون نوشتن)</a>
-    <a class="btn gray" href="<?php echo esc_url(add_query_arg(array_merge($base_args, ['retry' => $bf_retry ? 0 : 1]), $self)); ?>"><?php echo $bf_retry ? 'بررسی‌نشده‌ها' : 'ناقص‌های قبلی (retry)'; ?></a>
+    <a class="btn gray" href="<?php echo esc_url(add_query_arg(array_merge($base_args, ['retry' => $bf_retry ? 0 : 1, 'fixdate' => 0]), $self)); ?>"><?php echo $bf_retry ? 'بررسی‌نشده‌ها' : 'ناقص‌های قبلی (retry)'; ?></a>
+    <?php if ($bf_fixdate) : ?><a class="btn gray" href="<?php echo esc_url(remove_query_arg('fixdate', $self)); ?>">بررسی‌نشده‌ها</a><?php endif; ?>
     <a class="btn gray" href="meta-compare.php">متاها / فیلدهای ACF</a>
     <small class="muted">دسته: <?php echo (int) $bf_limit; ?> پست (<code>?limit=</code>۱ تا ۱۰۰) — جست‌وجوی مبدأ تا <?php echo (int) $bf_pages; ?> صفحه‌ی فهرست هنرمند (<code>?pages=</code>)</small>
   </div>
@@ -585,14 +633,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['fill']) && is_array(
     $bf_dry    = !empty($_POST['dry']);
     $from_post = true;
 } elseif ($bf_run) {
-    $process = !empty($bf_ids) ? $bf_ids : bf_candidates($bf_status, $bf_limit, $bf_before, $bf_retry);
+    $process = !empty($bf_ids) ? $bf_ids : bf_candidates($bf_status, $bf_limit, $bf_before, $bf_retry, $bf_fixdate);
 }
 
 if ($from_post || $bf_run) {
     $next_before = 0;
     echo '<div class="box"><h2>' . ($bf_dry ? 'پیش‌نمایش (چیزی نوشته نشد)' : 'نتیجه') . ' — ' . count($process) . ' پست' . ($bf_before ? ' (ادامه از پست ' . (int) $bf_before . ')' : '') . '</h2>';
     if (empty($process)) {
-        echo '<p class="ok">پستی برای پردازش نمانده است' . ($bf_retry ? ' (ناقصی وجود ندارد)' : '') . '.</p>';
+        echo '<p class="ok">پستی برای پردازش نمانده است' . ($bf_fixdate ? ' (تاریخ همه‌ی پست‌هایی که ربات داشت، در فیلد قالب هست)' : ($bf_retry ? ' (ناقصی وجود ندارد)' : '')) . '.</p>';
     } else {
         echo '<table><tr><th style="width:70px">پست</th><th style="width:28%">عنوان</th><th style="width:90px">نتیجه</th><th>جزئیات</th></tr>';
         $stats = ['ok' => 0, 'partial' => 0, 'error' => 0, 'skip' => 0];
@@ -635,7 +683,7 @@ if ($from_post || $bf_run) {
 
 /* ---------- فهرست ---------- */
 if (!$from_post && !$bf_run) :
-    $ids  = !empty($bf_ids) ? $bf_ids : bf_candidates($bf_status, $bf_limit, $bf_before, $bf_retry);
+    $ids  = !empty($bf_ids) ? $bf_ids : bf_candidates($bf_status, $bf_limit, $bf_before, $bf_retry, $bf_fixdate);
     $rows = [];
     foreach ($ids as $id) {
         $p = get_post($id);
@@ -650,7 +698,7 @@ if (!$from_post && !$bf_run) :
     $min_id = !empty($ids) ? min($ids) : 0;
 ?>
 <div class="box">
-  <h2><?php echo $bf_retry ? 'پست‌های بررسی‌شده‌ی ناقص' : 'پست‌های بررسی‌نشده'; ?> (<?php echo count($rows); ?> پست<?php echo $bf_before ? '، قدیمی‌تر از ' . (int) $bf_before : ''; ?>)</h2>
+  <h2><?php echo $bf_fixdate ? 'پست‌هایی که تاریخ فقط در متای ربات دارند (فیلد قالب خالی)' : ($bf_retry ? 'پست‌های بررسی‌شده‌ی ناقص' : 'پست‌های بررسی‌نشده'); ?> (<?php echo count($rows); ?> پست<?php echo $bf_before ? '، قدیمی‌تر از ' . (int) $bf_before : ''; ?>)</h2>
   <form method="post" action="<?php echo esc_url(add_query_arg($base_args, $self)); ?>">
     <?php wp_nonce_field('bm_backfill'); ?>
     <div class="toolbar">
