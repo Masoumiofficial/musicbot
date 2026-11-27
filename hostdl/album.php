@@ -8,16 +8,16 @@
  *   artist_en   : نام خواننده (برای تگ)
  *   album_en    : نام آلبوم (برای تگ)
  *   cover       : لینک کاور (برای تگ داخل فایل‌ها؛ اختیاری)
- *   folder_320  : نام پوشه‌ی کیفیت 320 (پیش‌فرض "{album_name} [320]")
+ *   folder_320  : نام پوشه‌ی کیفیت 320 (پیش‌فرض "{album_name}" — کیفیت اصلی بدون پسوند)
  *   folder_128  : نام پوشه‌ی کیفیت 128 (پیش‌فرض "{album_name} [128]")
  *   zip         : 1 = ساخت فایل ZIP هر کیفیت
- *   zip_320 / zip_128 : نام فایل‌های ZIP (پیش‌فرض "{album_name} [320].zip")
+ *   zip_320 / zip_128 : نام فایل‌های ZIP (پیش‌فرض "{album_name}.zip" و "{album_name} [128].zip")
  *   tracks      : JSON — [{"no":1,"name":"Sokoot","url_320":"...","url_128":"...","file_320":"...","file_128":"..."}, ...]
  *
  * ساختار نهایی:
- *   {dir_file}/{folder_320}/01. Artist - Track [320].mp3
+ *   {dir_file}/{folder_320}/01. Artist - Track.mp3
  *   {dir_file}/{folder_128}/01. Artist - Track [128].mp3
- *   {dir_file}/{album_name} [320].zip  و  [128].zip
+ *   {dir_file}/{album_name}.zip  و  {album_name} [128].zip
  *
  * خروجی JSON: {"ok":true,"dir":"...","tracks":[{"no":1,"320":{"ok":true,"name":"...","size":1},"128":{...}}],"zips":{"320":{...}},"errors":[],"warnings":[]}
  */
@@ -50,12 +50,15 @@ if (count($tracks) > 60) {
 }
 
 $folderNames = [
-    '320' => pz_sanitize_name(pz_post('folder_320')) ?: "{$albumName} [320]",
-    '128' => pz_sanitize_name(pz_post('folder_128')) ?: "{$albumName} [128]",
+    '320' => pz_sanitize_name(pz_post('folder_320')) ?: $albumName . pz_quality_suffix('320'),
+    '128' => pz_sanitize_name(pz_post('folder_128')) ?: $albumName . pz_quality_suffix('128'),
 ];
+if ($folderNames['128'] === $folderNames['320']) {
+    $folderNames['128'] = $albumName . ' [128]';
+}
 $zipNames = [
-    '320' => pz_sanitize_name(pz_post('zip_320')) ?: "{$albumName} [320].zip",
-    '128' => pz_sanitize_name(pz_post('zip_128')) ?: "{$albumName} [128].zip",
+    '320' => pz_sanitize_name(pz_post('zip_320')) ?: $folderNames['320'] . '.zip',
+    '128' => pz_sanitize_name(pz_post('zip_128')) ?: $folderNames['128'] . '.zip',
 ];
 $makeZip = pz_post('zip') === '1';
 
@@ -121,7 +124,7 @@ foreach ($tracks as $index => $track) {
 
         $fileName = isset($track["file_{$quality}"]) ? pz_sanitize_name($track["file_{$quality}"]) : '';
         if ($fileName === '') {
-            $fileName = sprintf('%02d. %s - %s [%s].mp3', $no, $artistName, $name, $quality);
+            $fileName = sprintf('%02d. %s - %s%s.mp3', $no, $artistName, $name, pz_quality_suffix($quality));
         }
 
         $path   = $absFolders[$quality] . '/' . $fileName;

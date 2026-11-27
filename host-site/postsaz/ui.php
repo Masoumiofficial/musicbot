@@ -125,6 +125,20 @@ function ps_ui_media($base, $label, $accept, array $opts = []) {
     echo '</div>';
 }
 
+/**
+ * «تاریخ انتشار واقعی» — همان جعبه‌ی «تاریخ انتشار واقعی آهنگ» قالب ترانه‌یار (متای _tara_release_date؛ bot/terms.php)
+ * شمسی (۱۴۰۳/۰۵/۱۲) یا میلادی (2024-08-02)؛ خالی = چیزی ثبت نمی‌شود و سایت «انتشار در سایت» را نشان می‌دهد
+ */
+function ps_ui_release_date($label = 'تاریخ انتشار واقعی اثر', array $opts = []) {
+    ps_ui_text('release_date', $label, [
+        'dir'         => 'ltr',
+        'placeholder' => '۱۴۰۳/۰۵/۱۲',
+        'hint'        => isset($opts['hint']) ? $opts['hint'] : 'شمسی (۱۴۰۳/۰۵/۱۲) یا میلادی (2024-08-02)؛ خالی = سایت «انتشار در سایت» را نشان می‌دهد. تاریخ خود پست عوض نمی‌شود.',
+        'class'       => isset($opts['class']) ? $opts['class'] : '',
+        'attrs'       => 'inputmode="numeric" autocomplete="off" maxlength="20"',
+    ]);
+}
+
 /** وضعیت انتشار */
 function ps_ui_status($selected = 'publish') {
     ps_ui_select('post_status', 'وضعیت پست', ['publish' => 'منتشر شود', 'draft' => 'پیش‌نویس بماند'], $selected);

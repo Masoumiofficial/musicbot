@@ -67,6 +67,29 @@ function ps_module_type($module) {
     return !empty($types) ? reset($types) : null;
 }
 
+/** کلید تب پنل برای یک نوع: تب جداگانه (tab در config) یا تب عمومی «تک‌آهنگ»/ماژول */
+function ps_type_tab(array $type) {
+    if ($type['module'] === 'single') {
+        $tab = !empty($type['tab']) ? sanitize_key((string) $type['tab']) : '';
+        return $tab !== '' ? $tab : 'single';
+    }
+    return $type['module'];
+}
+
+/**
+ * نوع‌های تک‌آهنگ گروه‌بندی‌شده بر اساس تب: ['single' => [...], 'trend' => [...]] — تب «تک‌آهنگ» همیشه اول
+ */
+function ps_single_tabs() {
+    $groups = ['single' => []];
+    foreach (ps_types('single') as $key => $type) {
+        $groups[ps_type_tab($type)][$key] = $type;
+    }
+    if (empty($groups['single'])) {
+        unset($groups['single']);
+    }
+    return $groups;
+}
+
 function ps_site_url() {
     return trailingslashit(!empty($GLOBALS['urlsite']) ? (string) $GLOBALS['urlsite'] : home_url());
 }
@@ -454,18 +477,46 @@ function ps_check_english($artist_en, $song_en) {
     return '';
 }
 
-function ps_names(array $type, $artist, $song, $artist_en, $song_en) {
-    $vars = [
+/** جایگزین‌های الگوهای config (title / keyword / description) */
+function ps_type_vars(array $type, $artist, $song, $artist_en, $song_en) {
+    return [
         '{artist}'    => $artist,
         '{song}'      => $song,
         '{artist_en}' => $artist_en,
         '{song_en}'   => $song_en,
         '{label}'     => $type['label'],
     ];
-    $template = !empty($type['title']) ? (string) $type['title'] : 'دانلود {label} {artist} {song}';
+}
+
+/** یک الگوی config را با جایگزین‌ها پر می‌کند و فاصله‌های اضافه را می‌گیرد */
+function ps_fill_template($template, array $vars) {
+    return trim((string) preg_replace('/\s+/u', ' ', strtr((string) $template, $vars)));
+}
+
+/**
+ * الگوهای عنوان یک نوع: اولی الگوی فعلی (title در config، پیش‌فرض «دانلود {label} {song} از {artist}»)،
+ * بقیه الگوهای قدیمی (title_legacy، پیش‌فرض «دانلود {label} {artist} {song}») که پست‌های قبلی سایت با آن ساخته شده‌اند
+ */
+function ps_title_templates(array $type) {
+    $current = !empty($type['title']) ? (string) $type['title'] : 'دانلود {label} {song} از {artist}';
+    $legacy  = isset($type['title_legacy']) ? array_values((array) $type['title_legacy']) : ['دانلود {label} {artist} {song}'];
+    return array_merge([$current], $legacy);
+}
+
+function ps_names(array $type, $artist, $song, $artist_en, $song_en) {
+    $vars      = ps_type_vars($type, $artist, $song, $artist_en, $song_en);
+    $templates = ps_title_templates($type);
+    $titles    = [];
+    foreach ($templates as $template) {
+        $title = ps_fill_template($template, $vars);
+        if ($title !== '' && !in_array($title, $titles, true)) {
+            $titles[] = $title;
+        }
+    }
 
     return [
-        'title'     => trim(preg_replace('/\s+/u', ' ', strtr($template, $vars))),
+        'title'     => ps_fill_template($templates[0], $vars),
+        'titles'    => $titles, // عنوان فعلی + عنوان‌های الگوی قدیمی (برای تشخیص پست تکراری)
         'slug'      => trim("{$artist_en} {$song_en}"),
         'alt'       => trim("{$type['label']} {$artist} {$song}"),
         'file_base' => bm_dl_file_name("{$artist_en} - {$song_en}"),
@@ -474,12 +525,46 @@ function ps_names(array $type, $artist, $song, $artist_en, $song_en) {
     ];
 }
 
+/**
+ * کلمه‌های کلیدی Rank Math: کلمه‌ی اصلی (الگوی keyword نوع، پیش‌فرض = همان الگوی عنوان «دانلود {label} {song} از {artist}»)،
+ * کلمه‌های اضافه‌ی نوع (keywords در config، مثلاً «آهنگ های ترند» یا «ریمیکس {song}»)، «خواننده آهنگ» و نام انگلیسی
+ */
 function ps_keywords(array $type, $artist, $song, $artist_en, $song_en) {
-    return array_values(array_unique(array_filter([
-        trim("دانلود {$type['label']} {$artist} {$song}"),
-        trim("{$artist} {$song}"),
-        ($artist_en !== $artist || $song_en !== $song) ? trim("{$artist_en} {$song_en}") : '',
-    ])));
+    $vars      = ps_type_vars($type, $artist, $song, $artist_en, $song_en);
+    $templates = ps_title_templates($type);
+    $primary   = ps_fill_template(!empty($type['keyword']) ? $type['keyword'] : $templates[0], $vars);
+    $keywords = [$primary];
+    foreach ((array) (isset($type['keywords']) ? $type['keywords'] : []) as $extra) {
+        $keywords[] = ps_fill_template($extra, $vars);
+    }
+    $keywords[] = trim("{$artist} {$song}");
+    $keywords[] = ($artist_en !== $artist || $song_en !== $song) ? trim("{$artist_en} {$song_en}") : '';
+    return array_values(array_unique(array_filter($keywords)));
+}
+
+/** توضیحات متا: الگوی description نوع (اگر در config باشد) وگرنه جمله‌ی پیش‌فرض ماژول */
+function ps_description(array $type, array $vars, $default) {
+    if (!empty($type['description'])) {
+        return ps_fill_template($type['description'], $vars);
+    }
+    return $default;
+}
+
+/**
+ * پیام پست تکراری (عنوان یکسان): لینک پست و ویرایش؛ اگر پست موجود در دسته‌ی اصلی این نوع نیست (مثلاً آهنگ عادی
+ * که حالا می‌خواهید «آهنگ ترند» شود) پیشنهاد می‌دهد همان پست را ویرایش کنید به‌جای ساختن پست دوباره
+ */
+function ps_duplicate_message($duplicate, array $type) {
+    $message = 'پستی با همین عنوان وجود دارد (ID ' . (int) $duplicate . ' «' . get_the_title($duplicate) . '»): ' . get_permalink($duplicate)
+        . ' — ویرایش: ' . admin_url('post.php?post=' . (int) $duplicate . '&action=edit');
+    $categories = isset($type['categories']) ? array_map('intval', (array) $type['categories']) : [];
+    if (!empty($categories) && !has_category($categories[0], $duplicate)) {
+        $term = get_term($categories[0], 'category');
+        if ($term && !is_wp_error($term)) {
+            $message .= ' — اگر همان اثر است، به‌جای پست دوباره، همان پست را ویرایش کنید و دسته‌ی «' . $term->name . '» را تیک بزنید.';
+        }
+    }
+    return $message . ' برای ثبت دوباره گزینه‌ی «اجازه‌ی عنوان تکراری» را بزنید.';
 }
 
 /** لینک آرشیو نوع (دسته‌ی اصلی) برای لینک اول متن پست */
@@ -508,7 +593,8 @@ function ps_build_content(array $type, array $args) {
     $label_fa = isset($type['content']['fa']) ? $type['content']['fa'] : 'دانلود ' . $type['label'] . ' جدید';
     $label_en = isset($type['content']['en']) ? $type['content']['en'] : 'Download New Music';
 
-    $first_html = '<a href="' . esc_url(ps_type_archive_link($type)) . '"><strong>' . esc_html($label_fa) . '</strong></a>';
+    // لینک‌های داخلی بدون دامنه (/music/، /artist/…) — bm_relative_url در bot/script.php؛ config: $bot_relative_links
+    $first_html = '<a href="' . esc_url(bm_relative_url(ps_type_archive_link($type))) . '"><strong>' . esc_html($label_fa) . '</strong></a>';
 
     if (empty($artists)) {
         $artists = [['name' => $artist, 'link' => '']];
@@ -521,7 +607,7 @@ function ps_build_content(array $type, array $args) {
         }
         $one_html = '<strong>' . esc_html($name) . '</strong>';
         if (!empty($one['link'])) {
-            $one_html = '<a class="ty-singer-link" href="' . esc_url($one['link']) . '">' . $one_html . '</a>';
+            $one_html = '<a class="ty-singer-link" href="' . esc_url(bm_relative_url($one['link'])) . '">' . $one_html . '</a>';
         }
         $singer_parts[] = $one_html;
     }
@@ -538,16 +624,29 @@ function ps_build_content(array $type, array $args) {
     return $html;
 }
 
-/** آیدی پستی با همین عنوان (برای جلوگیری از پست تکراری) */
-function ps_duplicate_post_id($title) {
+/**
+ * آیدی پستی با همین عنوان (برای جلوگیری از پست تکراری)
+ * یک عنوان یا فهرست عنوان‌ها (عنوان فعلی + عنوان‌های الگوی قدیمی، ps_names()['titles']) — اولین پست پیداشده
+ */
+function ps_duplicate_post_id($titles) {
     global $wpdb;
-    return (int) $wpdb->get_var($wpdb->prepare(
-        "SELECT ID FROM {$wpdb->posts}
-         WHERE post_title = %s AND post_type = 'post'
-         AND post_status IN ('publish', 'draft', 'pending', 'future')
-         ORDER BY ID DESC LIMIT 1",
-        $title
-    ));
+    foreach ((array) $titles as $title) {
+        $title = (string) $title;
+        if ($title === '') {
+            continue;
+        }
+        $post_id = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT ID FROM {$wpdb->posts}
+             WHERE post_title = %s AND post_type = 'post'
+             AND post_status IN ('publish', 'draft', 'pending', 'future')
+             ORDER BY ID DESC LIMIT 1",
+            $title
+        ));
+        if ($post_id) {
+            return $post_id;
+        }
+    }
+    return 0;
 }
 
 /** نویسنده‌ی پست (مثل ربات) و اجرای ادامه‌ی کار با همان کاربر */
@@ -683,6 +782,38 @@ function ps_apply_metas($post_id, array $metas) {
         }
         update_post_meta($post_id, $key, $value);
     }
+}
+
+/**
+ * «تاریخ انتشار واقعی» از فرم (فیلد release_date؛ شمسی یا میلادی، رقم فارسی هم می‌شود)
+ * خروجی: ['raw', 'pair' => ['g' => 'Y-m-d', 'j' => 'Y/m/d'], 'error']   — خالی = چیزی ثبت نمی‌شود (سایت «انتشار در سایت» را نشان می‌دهد)
+ * پیش از ساخت پست صدا زده می‌شود تا تاریخ نامعتبر همان اول برگردانده شود (نه بعد از انتقال فایل‌ها)
+ */
+function ps_release_date_input() {
+    $raw = ps_text('release_date');
+    $out = ['raw' => $raw, 'pair' => ['g' => '', 'j' => ''], 'error' => ''];
+    if ($raw === '') {
+        return $out;
+    }
+    $pair = function_exists('bm_release_date_pair') ? bm_release_date_pair($raw) : ['g' => '', 'j' => ''];
+    if ($pair['g'] === '') {
+        $out['error'] = 'تاریخ انتشار «' . $raw . '» معتبر نیست؛ شمسی مثل ۱۴۰۳/۰۵/۱۲ یا میلادی مثل 2024-08-02 بنویسید (یا خالی بگذارید).';
+        return $out;
+    }
+    $out['pair'] = $pair;
+    return $out;
+}
+
+/**
+ * ثبت تاریخ انتشار واقعی روی پست: همان جایی که قالب می‌خواند (جعبه‌ی «تاریخ انتشار واقعی آهنگ» ترانه‌یار = متای _tara_release_date
+ * میلادی Y-m-d؛ bm_store_release_date در bot/terms.php) + متاهای _bm_release_date / _bm_release_date_jalali — و یک سطر گزارش
+ */
+function ps_apply_release_date(array &$report, $post_id, array $input) {
+    if (empty($input['pair']['g'])) {
+        return;
+    }
+    $r = bm_store_release_date($post_id, $input['pair']['g'], $input['pair']['j']);
+    ps_row($report, 'تاریخ انتشار واقعی', bm_release_date_summary($r), !empty($r['ok']) ? 'ok' : 'warn');
 }
 
 /** متاهای ثابت این نوع از config (metas) — مثل ty_content_type = video */
@@ -1020,8 +1151,8 @@ function ps_dl_file_text(array $file) {
  * ====================================================== */
 
 /**
- * اگر کاربر انتشار خواسته و فایل‌ها سالم منتقل شده‌اند پست منتشر می‌شود؛
- * اگر انتقال فایل خطا داشت پست پیش‌نویس می‌ماند تا بعد از رفع مشکل از پیشخوان منتشر شود.
+ * اگر کاربر انتشار خواسته و فایل‌ها سالم منتقل شده‌اند پست منتشر می‌شود (برای تک‌آهنگ، رسیدن دست‌کم یکی از دو کیفیت کافی است)؛
+ * اگر هیچ فایلی منتقل نشد پست پیش‌نویس می‌ماند تا بعد از رفع مشکل از پیشخوان منتشر شود.
  */
 function ps_finish(array &$report, $post_id, $want_publish, $files_ok) {
     $report['link']      = get_permalink($post_id);
@@ -1032,7 +1163,7 @@ function ps_finish(array &$report, $post_id, $want_publish, $files_ok) {
         return;
     }
     if (!$files_ok) {
-        ps_row($report, 'وضعیت', 'پیش‌نویس ماند — انتقال فایل‌ها به هاست دانلود کامل نشد؛ بعد از رفع مشکل از پیشخوان منتشر کنید', 'error');
+        ps_row($report, 'وضعیت', 'پیش‌نویس ماند — انتقال فایل‌ها به هاست دانلود انجام نشد؛ بعد از رفع مشکل از پیشخوان منتشر کنید', 'error');
         return;
     }
 
@@ -1069,6 +1200,10 @@ function ps_run_single() {
     if ($english_error !== '') {
         return ps_fail($report, $english_error);
     }
+    $release = ps_release_date_input();
+    if ($release['error'] !== '') {
+        return ps_fail($report, $release['error']);
+    }
     $names = ps_names($type, $artist, $song, $artist_en, $song_en);
 
     $cover = ps_source('cover_url', 'cover_file', ['image'], 'کاور');
@@ -1084,9 +1219,9 @@ function ps_run_single() {
     }
 
     if (!ps_in('allow_duplicate')) {
-        $duplicate = ps_duplicate_post_id($names['title']);
+        $duplicate = ps_duplicate_post_id($names['titles']); // عنوان فعلی + عنوان‌های الگوی قدیمی
         if ($duplicate) {
-            return ps_fail($report, 'پستی با همین عنوان وجود دارد (ID ' . $duplicate . '): ' . get_permalink($duplicate) . ' — برای ثبت دوباره گزینه‌ی «اجازه‌ی عنوان تکراری» را بزنید.');
+            return ps_fail($report, ps_duplicate_message($duplicate, $type));
         }
     }
     if (bm_auth_userpwd() === '') {
@@ -1126,18 +1261,28 @@ function ps_run_single() {
     $author = get_userdata($author_id);
     ps_row($report, 'نویسنده', $author ? $author->display_name . ' (' . $author->user_login . ' — ID ' . $author_id . ')' : 'ID ' . $author_id);
 
-    $description = 'دانلود ' . $type['label'] . " جدید {$artist} به نام {$song} با کیفیت 320 و 128، پخش آنلاین" . ($lyrics !== '' ? ' و متن ترانه' : '');
+    $description = ps_description($type, ps_type_vars($type, $artist, $song, $artist_en, $song_en), 'دانلود ' . $type['label'] . " جدید {$artist} به نام {$song} با کیفیت 320 و 128، پخش آنلاین") . ($lyrics !== '' ? ' و متن ترانه' : '');
     ps_apply_seo($post_id, $names['title'], $description, ps_keywords($type, $artist, $song, $artist_en, $song_en));
 
     ps_row($report, 'دسته‌ها', ps_apply_categories($post_id, ps_selected_categories($type)));
     $artist_result = ps_apply_artists($post_id, $terms);
     ps_row($report, 'هنرمند', $artist_result['text'], $artist_result['status']);
-    bm_set_term_if_not_empty($post_id, $mood, 'mood', false);
-    bm_set_term_if_not_empty($post_id, $genre, 'genre', false);
+    // ژانر/حال‌وهوا/عوامل → تاکسونومی‌های قالب (tara_genre, tara_mood, tara_songwriter, …؛ bot/terms.php — نام‌ها طبق config ربات)
+    $role_terms = bm_apply_role_terms($post_id, [
+        'mood'     => $mood,
+        'style'    => $genre,
+        'lyricist' => $crew['lyricist'],
+        'composer' => $crew['composer'],
+        'arranger' => $crew['arranger'],
+    ]);
+    if (!empty($role_terms)) {
+        ps_row($report, 'ژانر/حال‌وهوا/عوامل', bm_role_terms_summary($role_terms));
+    }
+    ps_apply_release_date($report, $post_id, $release);
 
     $host    = ps_dl_host();
-    $file320 = $names['file_base'] . ' [320].mp3';
-    $file128 = $names['file_base'] . ' [128].mp3';
+    $file320 = bm_music_file_name($names['file_base'], '320'); // «Artist - Song.mp3» (320 بدون پسوند)
+    $file128 = bm_music_file_name($names['file_base'], '128'); // «Artist - Song [128].mp3»
     $url320  = $m320['url'] !== '' ? $host . $names['dl_dir'] . '/' . $file320 : '';
     $url128  = $m128['url'] !== '' ? $host . $names['dl_dir'] . '/' . $file128 : '';
     $online  = $url128 !== '' ? $url128 : $url320;
@@ -1172,23 +1317,44 @@ function ps_run_single() {
         'file_320'  => $file320,
         'file_128'  => $file128,
         'dir_file'  => $names['dl_dir'],
+        'lyrics'    => bm_lyrics_plain($lyrics), // متن ترانه داخل تگ ID3 فایل‌ها (hostdl/music.php)
     ]);
     ps_store_dl_response($post_id, $response);
 
     ps_row($report, 'پوشه‌ی هاست دانلود', $names['dl_dir']);
-    if ($response['success']) {
+    $files_ok = (bool) $response['success'];
+    if ($files_ok) {
+        bm_set_download_state($post_id, 'ok');
         ps_row($report, 'انتقال فایل‌ها', 'انجام شد' . ($m320['url'] !== '' ? ' — 320' : '') . ($m128['url'] !== '' ? ' — 128' : ''));
     } else {
-        ps_row($report, 'انتقال فایل‌ها', 'ناموفق: ' . ps_dl_error_text($response), 'error');
+        // فقط یکی از دو کیفیت رسیده؟ (مثلاً لینک 320 مبدأ خراب بود) → همان کافی است: لینک کیفیت نرسیده از پست برداشته
+        // و پست با کیفیت موجود منتشر می‌شود (همان قاعده‌ی ربات؛ bm_sync_music_metas در bot/script.php)
+        $landed = is_array($response['json']) && !empty($response['json']['files']) && is_array($response['json']['files'])
+            ? bm_dl_landed(['files' => $response['json']['files']])
+            : null;
+        $have = ['320' => is_array($landed) && $landed['320'] === true, '128' => is_array($landed) && $landed['128'] === true];
+        if ($have['320'] || $have['128']) {
+            $sync     = bm_sync_music_metas($post_id, $have, ['320' => $url320, '128' => $url128]);
+            $files_ok = $sync['usable'];
+            bm_set_download_state($post_id, 'partial', $sync['label'] . ' — ' . ps_dl_error_text($response));
+            ps_row($report, 'انتقال فایل‌ها', 'ناقص — ' . $sync['label'] . ' روی هاست نشست و پست با همان قابل استفاده است: ' . ps_dl_error_text($response)
+                . (!empty($sync['changes']) ? ' — ' . implode('؛ ', $sync['changes']) : ''), 'warn');
+        } else {
+            bm_set_download_state($post_id, 'failed');
+            ps_row($report, 'انتقال فایل‌ها', 'ناموفق: ' . ps_dl_error_text($response), 'error');
+        }
     }
-    if ($url320 !== '') {
-        $report['links'][] = ['label' => 'MP3 320', 'url' => $url320];
+    // لینک‌های گزارش از روی متاهای نهایی پست (کیفیتی که نرسیده، لینک ندارد)
+    $final320 = (string) get_post_meta($post_id, 'music320', true);
+    $final128 = (string) get_post_meta($post_id, 'music128', true);
+    if ($final320 !== '') {
+        $report['links'][] = ['label' => 'MP3 320', 'url' => $final320];
     }
-    if ($url128 !== '') {
-        $report['links'][] = ['label' => 'MP3 128', 'url' => $url128];
+    if ($final128 !== '' && $final128 !== $final320) {
+        $report['links'][] = ['label' => 'MP3 128', 'url' => $final128];
     }
 
-    ps_finish($report, $post_id, $want_publish, $response['success']);
+    ps_finish($report, $post_id, $want_publish, $files_ok);
     return $report;
 }
 
@@ -1216,6 +1382,10 @@ function ps_run_video() {
     if ($english_error !== '') {
         return ps_fail($report, $english_error);
     }
+    $release = ps_release_date_input();
+    if ($release['error'] !== '') {
+        return ps_fail($report, $release['error']);
+    }
     $names = ps_names($type, $artist, $song, $artist_en, $song_en);
 
     $cover = ps_source('cover_url', 'cover_file', ['image'], 'کاور');
@@ -1239,9 +1409,9 @@ function ps_run_video() {
     }
 
     if (!ps_in('allow_duplicate')) {
-        $duplicate = ps_duplicate_post_id($names['title']);
+        $duplicate = ps_duplicate_post_id($names['titles']); // عنوان فعلی + عنوان‌های الگوی قدیمی
         if ($duplicate) {
-            return ps_fail($report, 'پستی با همین عنوان وجود دارد (ID ' . $duplicate . '): ' . get_permalink($duplicate) . ' — برای ثبت دوباره گزینه‌ی «اجازه‌ی عنوان تکراری» را بزنید.');
+            return ps_fail($report, ps_duplicate_message($duplicate, $type));
         }
     }
     if (bm_auth_userpwd() === '') {
@@ -1281,12 +1451,13 @@ function ps_run_video() {
     $quality_labels = array_map(function ($q) {
         return $q . 'p';
     }, array_keys($videos));
-    $description = "دانلود موزیک ویدیو جدید {$artist} به نام {$song} با کیفیت " . implode('، ', $quality_labels) . ' و پخش آنلاین';
+    $description = ps_description($type, ps_type_vars($type, $artist, $song, $artist_en, $song_en), "دانلود موزیک ویدیو جدید {$artist} به نام {$song} با کیفیت " . implode('، ', $quality_labels) . ' و پخش آنلاین');
     ps_apply_seo($post_id, $names['title'], $description, ps_keywords($type, $artist, $song, $artist_en, $song_en));
 
     ps_row($report, 'دسته‌ها', ps_apply_categories($post_id, ps_selected_categories($type)));
     $artist_result = ps_apply_artists($post_id, $terms);
     ps_row($report, 'هنرمند', $artist_result['text'], $artist_result['status']);
+    ps_apply_release_date($report, $post_id, $release);
 
     $host      = ps_dl_host();
     $meta_map  = (array) ps_cfg('video.meta', []);
@@ -1424,6 +1595,10 @@ function ps_run_album() {
     if ($english_error !== '') {
         return ps_fail($report, $english_error);
     }
+    $release = ps_release_date_input();
+    if ($release['error'] !== '') {
+        return ps_fail($report, $release['error']);
+    }
     $names = ps_names($type, $artist, $song, $artist_en, $song_en);
 
     $cover = ps_source('cover_url', 'cover_file', ['image'], 'کاور');
@@ -1441,9 +1616,9 @@ function ps_run_album() {
     }
 
     if (!ps_in('allow_duplicate')) {
-        $duplicate = ps_duplicate_post_id($names['title']);
+        $duplicate = ps_duplicate_post_id($names['titles']); // عنوان فعلی + عنوان‌های الگوی قدیمی
         if ($duplicate) {
-            return ps_fail($report, 'پستی با همین عنوان وجود دارد (ID ' . $duplicate . '): ' . get_permalink($duplicate) . ' — برای ثبت دوباره گزینه‌ی «اجازه‌ی عنوان تکراری» را بزنید.');
+            return ps_fail($report, ps_duplicate_message($duplicate, $type));
         }
     }
     if (bm_auth_userpwd() === '') {
@@ -1474,20 +1649,21 @@ function ps_run_album() {
     $author = get_userdata($author_id);
     ps_row($report, 'نویسنده', $author ? $author->display_name . ' (' . $author->user_login . ' — ID ' . $author_id . ')' : 'ID ' . $author_id);
 
-    $description = "دانلود آلبوم جدید {$song} از {$artist} با " . count($tracks) . ' قطعه، کیفیت 320 و 128، پخش آنلاین';
+    $description = ps_description($type, ps_type_vars($type, $artist, $song, $artist_en, $song_en), "دانلود آلبوم جدید {$song} از {$artist} با " . count($tracks) . ' قطعه، کیفیت 320 و 128، پخش آنلاین');
     ps_apply_seo($post_id, $names['title'], $description, ps_keywords($type, $artist, $song, $artist_en, $song_en));
 
     ps_row($report, 'دسته‌ها', ps_apply_categories($post_id, ps_selected_categories($type)));
     $artist_result = ps_apply_artists($post_id, $terms);
     ps_row($report, 'هنرمند', $artist_result['text'], $artist_result['status']);
+    ps_apply_release_date($report, $post_id, $release);
 
     // نام پوشه‌ها و فایل‌ها روی هاست دانلود
     $host      = ps_dl_host();
     $base_url  = $host . $names['dl_dir'] . '/';
-    $folder320 = $names['file_base'] . ' [320]';
-    $folder128 = $names['file_base'] . ' [128]';
-    $zip320    = $names['file_base'] . ' [320].zip';
-    $zip128    = $names['file_base'] . ' [128].zip';
+    $folder320 = $names['file_base'] . bm_dl_quality_suffix('320'); // «Artist - Album» (320 بدون پسوند)
+    $folder128 = $names['file_base'] . bm_dl_quality_suffix('128'); // «Artist - Album [128]»
+    $zip320    = $folder320 . '.zip';
+    $zip128    = $folder128 . '.zip';
     $has320    = false;
     $has128    = false;
 
@@ -1502,8 +1678,8 @@ function ps_run_album() {
 
     foreach ($tracks as $track) {
         $track_base = sprintf('%02d. ', $track['no']) . bm_dl_file_name("{$artist_en} - {$track['name']}");
-        $file320    = $track_base . ' [320].mp3';
-        $file128    = $track_base . ' [128].mp3';
+        $file320    = bm_music_file_name($track_base, '320'); // «01. Artist - Track.mp3»
+        $file128    = bm_music_file_name($track_base, '128'); // «01. Artist - Track [128].mp3»
         $url320     = $track['url320'] !== '' ? $base_url . $folder320 . '/' . $file320 : '';
         $url128     = $track['url128'] !== '' ? $base_url . $folder128 . '/' . $file128 : '';
         $has320     = $has320 || $url320 !== '';
@@ -1642,7 +1818,7 @@ function ps_run_leech() {
 
     $file_base = bm_dl_file_name("{$artist_en} - {$song_en}");
     $dl_dir    = bm_download_dir($folder, $artist_en);
-    $mp3_name  = $file_base . " [{$mp3_quality}].mp3";
+    $mp3_name  = bm_music_file_name($file_base, $mp3_quality); // 320 بدون پسوند، 128 با « [128]»
     $mp4_name  = $file_base . " [{$mp4_quality}].mp4";
     $host      = ps_dl_host();
 

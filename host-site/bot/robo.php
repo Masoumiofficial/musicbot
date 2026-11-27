@@ -9,6 +9,8 @@ $done_title = isset($_GET['t']) ? trim((string) $_GET['t']) : '';
 if ($done_link !== '' && !filter_var($done_link, FILTER_VALIDATE_URL)) {
     $done_link = '';
 }
+// مسیر پوشه‌ی ربات روی همین سایت (مثل /bot) — بدون دامنه، تا با تغییر دامنه چیزی عوض نشود
+$bot_base = rtrim(str_replace('\\', '/', dirname((string) $_SERVER['SCRIPT_NAME'])), '/');
 ?>
 <!DOCTYPE html>
 <html lang="fa">
@@ -16,13 +18,13 @@ if ($done_link !== '' && !filter_var($done_link, FILTER_VALIDATE_URL)) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>فرم ارسال پست</title>
-    <link rel="stylesheet" href="https://ahangban.ir/bot/files/styles.css">
+    <link rel="stylesheet" href="<?php echo htmlspecialchars($bot_base, ENT_QUOTES, 'UTF-8'); ?>/files/styles.css">
 </head>
 <body>
     <div class="background"></div>
     <div class="form-container">
 	 <?php if ($done_link !== '') echo '<div class="alert-box"><p><a href="' . htmlspecialchars($done_link, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($done_title !== '' ? $done_title : $done_link, ENT_QUOTES, 'UTF-8') . '</a></p></div>'; ?> 
-        <form action="https://ahangban.ir/bot/manual.php" method="post">
+        <form action="<?php echo htmlspecialchars($bot_base, ENT_QUOTES, 'UTF-8'); ?>/manual.php" method="post">
             <label for="link">: لینک پست </label>
             <input type="url" id="link" name="link" placeholder="https://example.com" required>
             <label for="same_title" style="display:flex;align-items:center;gap:8px;font-size:13px;margin:8px 0;cursor:pointer">

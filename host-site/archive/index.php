@@ -17,6 +17,7 @@ $bm_wp_load = is_file(dirname(__DIR__) . '/wp-load.php')
     ? dirname(__DIR__) . '/wp-load.php'
     : rtrim((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''), '/\\') . '/wp-load.php';
 require_once $bm_wp_load;
+require_once $bm_bot_dir . '/source.php'; // خواندن صفحه‌ی هنرمند سایت مبدأ (ساختار جدید بیاتوموزیک)
 set_time_limit(0);
 
 // فهرست آهنگ‌های هنرمند از سایت مبدأ + وضعیت هر کدام در سایت
@@ -25,12 +26,20 @@ $archive_query  = '';
 $archive_error  = '';
 if (!empty($_GET['artist'])) {
     $archive_query = sanitize_text_field(wp_unslash($_GET['artist']));
-    $b2m_url = 'https://www.mybia2music.com/artists/' . str_replace(' ', '-', $archive_query) . '?more=musics';
-    $source  = @file_get_contents($b2m_url);
-    if ($source === false || $source === '') {
-        $archive_error = 'صفحه‌ی هنرمند از سایت مبدأ دریافت نشد؛ نام انگلیسی هنرمند را بررسی کنید.';
+    $artist_slug   = strtolower(trim(preg_replace('/[\s_]+/u', '-', trim($archive_query)), '-'));
+    // آدرس صفحه‌ی هنرمند: config.php ($bot_source_artist_url، {artist} = نامک)؛ پیش‌فرض ساختار جدید بیاتوموزیک
+    $artist_url_tpl = (isset($bot_source_artist_url) && is_string($bot_source_artist_url) && $bot_source_artist_url !== '')
+        ? $bot_source_artist_url
+        : 'https://www.mybia2music.com/artists/{artist}/musics';
+    $b2m_url  = str_replace('{artist}', rawurlencode($artist_slug), $artist_url_tpl);
+    $response = bm_source_http_get($b2m_url, 40);
+    if ($response['body'] === '' || $response['code'] >= 400) {
+        $archive_error = 'صفحه‌ی هنرمند از سایت مبدأ دریافت نشد (' . ($response['error'] !== '' ? 'cURL: ' . $response['error'] : 'HTTP ' . $response['code']) . ')؛ نام انگلیسی هنرمند را بررسی کنید.';
     } else {
-        $archive_items = bm_archive_classify_items(bm_archive_parse_listing($source), $wpdb);
+        $archive_items = bm_archive_classify_items(bm_archive_parse_listing($response['body'], $b2m_url), $wpdb);
+        if (empty($archive_items)) {
+            $archive_error = 'در صفحه‌ی هنرمند آهنگی پیدا نشد؛ نام انگلیسی هنرمند (نامک صفحه‌ی او در سایت مبدأ) را بررسی کنید.';
+        }
     }
 }
 

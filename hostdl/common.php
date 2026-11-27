@@ -317,9 +317,19 @@ function pz_cover_prepare($cover) {
 }
 
 /**
- * نوشتن تگ ID3v2.3 با getID3 (همان قالب music.php)
- * $tags: title, artist, album, track, year, cover (مسیر فایل تصویر؛ اگر واترمارک فعال باشد اول لوگو روی آن می‌نشیند)
- * خروجی: ['ok' => bool, 'warnings' => [], 'errors' => [], 'watermark' => خروجی pz_cover_prepare یا null]
+ * پسوند کیفیت در نام فایل/پوشه (همان قاعده‌ی ربات، bm_dl_quality_suffix در bot/script.php):
+ * کیفیت اصلی 320 بدون پسوند «Artist - Song.mp3»، کیفیت 128 با « [128]» → «Artist - Song [128].mp3»
+ * فقط برای وقتی که فرستنده نام فایل را نفرستاده باشد (file_320 / file_128 / folder_* / zip_*)
+ */
+function pz_quality_suffix($quality) {
+    return (string) $quality === '128' ? ' [128]' : '';
+}
+
+/**
+ * نوشتن تگ ID3v2.3 با getID3 (همان قالب music.php): عنوان، خواننده، آلبوم، سال، کاور (با لوگوی سایت) و متن ترانه
+ * $tags: title, artist, [album], [track], [year], [cover = مسیر فایل تصویر؛ اگر واترمارک فعال باشد اول لوگو روی آن می‌نشیند],
+ *        [lyrics = متن ساده‌ی ترانه → فریم USLT که پلیرها به‌عنوان Lyrics نشان می‌دهند؛ خالی = بدون تگ متن]
+ * خروجی: ['ok' => bool, 'warnings' => [], 'errors' => [], 'watermark' => خروجی pz_cover_prepare یا null, 'lyrics' => bool]
  */
 function pz_write_mp3_tags($path, array $tags) {
     require_once __DIR__ . '/getid3/getid3.php';
@@ -357,6 +367,12 @@ function pz_write_mp3_tags($path, array $tags) {
         'unique_file_identifier' => ['ownerid' => PZ_BRAND, 'data' => md5($path . microtime(true))],
     ];
 
+    // متن ترانه (USLT): getID3 متن غیرلاتین را خودش به UTF-16 (encodingid 1) تبدیل می‌کند؛ خط‌ها با \n
+    $lyrics = isset($tags['lyrics']) ? trim(str_replace(["\r\n", "\r"], "\n", (string) $tags['lyrics'])) : '';
+    if ($lyrics !== '') {
+        $data['unsynchronised_lyric'] = [$lyrics];
+    }
+
     $cover     = isset($tags['cover']) ? (string) $tags['cover'] : '';
     $prepared  = pz_cover_prepare($cover);
     $cover     = $prepared['path'];
@@ -382,6 +398,7 @@ function pz_write_mp3_tags($path, array $tags) {
         'warnings'  => array_map('strval', (array) $writer->warnings),
         'errors'    => array_map('strval', (array) $writer->errors),
         'watermark' => $prepared['watermark'],
+        'lyrics'    => $lyrics !== '',
     ];
 }
 

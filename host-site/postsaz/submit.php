@@ -92,6 +92,12 @@ try {
 }
 
 $module_tab = in_array($module, ['single', 'video', 'album', 'leech'], true) ? $module : 'single';
+if ($module === 'single') { // برگشت به همان تب (تک‌آهنگ یا تب جداگانه‌ی نوع، مثل «آهنگ ترند»)
+    $submitted_type = ps_type(ps_text('type'));
+    if ($submitted_type) {
+        $module_tab = ps_type_tab($submitted_type);
+    }
+}
 ?>
 <section class="ps-result">
     <h1 class="<?php echo $report['ok'] ? 'is-ok' : 'is-error'; ?>">

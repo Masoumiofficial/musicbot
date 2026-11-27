@@ -9,7 +9,7 @@
  *   song_en   : نام اثر (تگ)
  *   album     : نام آلبوم برای تگ (اختیاری؛ پیش‌فرض "{song_en} Single")
  *   cover     : لینک کاور (اختیاری)
- *   mp3       : لینک فایل MP3      mp3_name : نام فایل مقصد (مثال "Artist - Song [320].mp3")
+ *   mp3       : لینک فایل MP3      mp3_name : نام فایل مقصد (مثال "Artist - Song.mp3" برای 320 و "Artist - Song [128].mp3")
  *   mp4       : لینک فایل MP4      mp4_name : نام فایل مقصد (مثال "Artist - Song [1080].mp4")
  *
  * خروجی JSON: {"ok":true,"dir":"...","files":{"mp3":{"ok":true,"name":"...","size":1},"mp4":{...}},"errors":[],"warnings":[]}
