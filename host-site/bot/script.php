@@ -1896,6 +1896,9 @@ if ($bm_artist_tax_early !== '' && count(bm_split_artists($artist)) === 1 && !te
 
 $source_exists = bm_post_id_by_source_url($postUrl);
 if ($source_exists) {
+    if (isset($GLOBALS['bm_auto_job']) && is_array($GLOBALS['bm_auto_job'])) {
+        $GLOBALS['bm_auto_job']['exists'] = (int) $source_exists; // auto.php: آیتم done با همان پست؛ دوباره امتحان نمی‌شود
+    }
     exit('همین آهنگ (همین لینک مبدأ) قبلاً ثبت شده است. ID: ' . intval($source_exists)
         . bm_result_marker('exists', ['reason' => 'source', 'post_id' => $source_exists, 'link' => get_permalink($source_exists), 'message' => 'همین لینک قبلاً ثبت شده (ID ' . $source_exists . ')']));
 }
@@ -1905,6 +1908,9 @@ if ($source_exists) {
 $title_exists = bm_post_id_by_song_title($artist, $song);
 if ($title_exists) {
     if ($same_title_mode !== 'number') {
+        if (isset($GLOBALS['bm_auto_job']) && is_array($GLOBALS['bm_auto_job'])) {
+            $GLOBALS['bm_auto_job']['exists'] = (int) $title_exists; // auto.php: آیتم done با همان پست
+        }
         exit('پست با این عنوان قبلاً ثبت شده است. ID: ' . intval($title_exists) . ' («' . get_the_title($title_exists) . '»)'
             . ' — اگر قطعه‌ی دیگری با همین نام است، با گزینه‌ی «ثبت با شماره» دوباره بفرستید.'
             . bm_result_marker('exists', ['reason' => 'title', 'post_id' => $title_exists, 'link' => get_permalink($title_exists), 'message' => 'پستی با همین عنوان هست (ID ' . $title_exists . ': ' . get_the_title($title_exists) . ')']));

@@ -16,7 +16,9 @@
  *        auto.php?report=1 را در مرورگر باز کنید و با یوزر/رمز ربات وارد شوید.
  *   ب) اگر BM_AUTH_PASS تعریف نشده باشد، مثل بقیه‌ی فایل‌های ربات یوزر/رمز لازم است:
  *            wget -q -O /dev/null --user='sajad' --password='رمز' https://ahangban.ir/bot/auto.php
- *   هر ۵ دقیقه یک بار کافی است (0,5,10,15,... * * * *). اجراهای هم‌زمان قفل می‌شوند.
+ *   هر ۵ دقیقه یک بار کافی است (0,5,10,15,... * * * *). اجراهای هم‌زمان قفل می‌شوند («اجرای قبلی هنوز تمام نشده است»
+ *   یعنی همان لحظه اجرای کران در جریان است — طبیعی است؛ اگر اجرایی قطع شده باشد قفل بعد از ۱۰ دقیقه ($lock_minutes) خودش
+ *   آزاد می‌شود یا با auto.php?unlock=1 (با یوزر/رمز ربات) همان لحظه).
  *
  * آیتم‌های بررسی‌شده در جدول wp_subcheck نگه داشته می‌شوند (اگر نباشد ساخته می‌شود).
  * اگر ثبت آیتمی با خطا تمام شود (مثلاً API در دسترس نباشد) وضعیتش failed می‌شود و فقط وقتی
@@ -44,7 +46,8 @@ if (!empty($rssFeedUrl)) {
 $subcheck_table = 'wp_subcheck'; // جدول آیتم‌های بررسی‌شده‌ی فهرست
 $max_feed_items = 30;            // چند آیتم اول فهرست (جدیدترین‌ها) بررسی شود
 $max_attempts   = 3;             // آیتم خطادار حداکثر چند بار (در اجراهای بعدی) دوباره امتحان شود
-$lock_minutes   = 15;            // اگر اجرای قبلی هنوز تمام نشده، تا این مدت اجرای جدید شروع نمی‌شود
+$lock_minutes   = 10;            // اگر اجرای قبلی هنوز تمام نشده، تا این مدت اجرای جدید شروع نمی‌شود (هر اجرا معمولاً ۱ تا ۵ دقیقه؛
+                                 // اگر اجرایی وسط کار قطع شود قفل خودش بعد از این مدت آزاد می‌شود — auto.php?unlock=1 همین حالا)
 
 /**
  * جدول wp_subcheck: اگر نبود ساخته می‌شود؛ اگر از نسخه‌ی قدیمی (فقط ستون url) بود، ستون‌های وضعیت اضافه می‌شوند
@@ -111,6 +114,61 @@ function bm_auto_stop($message) {
     exit($message);
 }
 
+/** «۴۵ ثانیه پیش» / «۳ دقیقه پیش» */
+function bm_auto_age_text($seconds) {
+    $seconds = max(0, (int) $seconds);
+    if ($seconds < 90) {
+        return $seconds . ' ثانیه پیش';
+    }
+    if ($seconds < 5400) {
+        return (int) round($seconds / 60) . ' دقیقه پیش';
+    }
+    return (int) round($seconds / 3600) . ' ساعت پیش';
+}
+
+/**
+ * قفل اجرای جاری (transient bm_auto_lock): ['time' => شروع، 'url' => آیتم در حال ثبت، 'title'] یا null
+ * نسخه‌های قبلی فقط زمان را ذخیره می‌کردند؛ آن هم خوانده می‌شود
+ */
+function bm_auto_lock_info() {
+    $lock = get_transient('bm_auto_lock');
+    if ($lock === false || $lock === '' || $lock === null) {
+        return null;
+    }
+    if (is_array($lock)) {
+        return [
+            'time'  => isset($lock['time']) ? (int) $lock['time'] : 0,
+            'url'   => isset($lock['url']) ? (string) $lock['url'] : '',
+            'title' => isset($lock['title']) ? (string) $lock['title'] : '',
+        ];
+    }
+    return ['time' => (int) $lock, 'url' => '', 'title' => ''];
+}
+
+/** گرفتن / به‌روز کردن قفل (زمان شروع همان اولین بار می‌ماند؛ آیتم در حال ثبت بعد از انتخاب اضافه می‌شود) */
+function bm_auto_lock_set($url = '', $title = '') {
+    global $lock_minutes;
+    if (empty($GLOBALS['bm_auto_started'])) {
+        $GLOBALS['bm_auto_started'] = time();
+    }
+    $title = wp_strip_all_tags((string) $title);
+    set_transient('bm_auto_lock', ['time' => (int) $GLOBALS['bm_auto_started'], 'url' => (string) $url, 'title' => $title], max(1, (int) $lock_minutes) * 60);
+    $GLOBALS['bm_auto_locked'] = true;
+    if ($url !== '') {
+        // بر خلاف قفل، منقضی نمی‌شود: در اجرای بعدی معلوم می‌کند آیتم pending مال چند دقیقه پیش است (bm_auto_finish پاکش می‌کند)
+        update_option('bm_auto_running', ['time' => time(), 'url' => (string) $url, 'title' => $title], false);
+    }
+}
+
+/** متن «آخرین اجرای تمام‌شده» (option bm_auto_last) برای پیام قفل */
+function bm_auto_last_text() {
+    $last = get_option('bm_auto_last');
+    if (!is_array($last) || empty($last['time'])) {
+        return '';
+    }
+    return 'آخرین اجرای تمام‌شده: ' . bm_auto_age_text(time() - (int) $last['time']) . (!empty($last['text']) ? ' — ' . $last['text'] : '');
+}
+
 /**
  * آیتم‌هایی که ربات نمی‌تواند ثبت کند (فقط تک‌آهنگ ثبت می‌شود): آلبوم، موزیک ویدیو، پلی‌لیست
  * از عنوان فید («دانلود آلبوم …»، «دانلود موزیک ویدیو …») و نامک لینک (…-album، …-video، /playlist/) تشخیص داده می‌شود.
@@ -150,6 +208,7 @@ function bm_auto_finish() {
 
     if (!empty($GLOBALS['bm_auto_locked'])) {
         delete_transient('bm_auto_lock');
+        delete_option('bm_auto_running');
     }
 
     $job  = isset($GLOBALS['bm_auto_job']) ? $GLOBALS['bm_auto_job'] : null;
@@ -159,6 +218,10 @@ function bm_auto_finish() {
         if (!empty($job['done'])) {
             $wpdb->update($job['table'], ['status' => 'done', 'post_id' => (int) $job['post_id']], ['url' => $job['url']]);
             $line = 'ثبت شد: ' . $job['title'] . ' (پست ' . (int) $job['post_id'] . ')';
+        } elseif (!empty($job['exists'])) {
+            // script.php: همین لینک/عنوان قبلاً در سایت هست → همان پست؛ دیگر تکرار نمی‌شود
+            $wpdb->update($job['table'], ['status' => 'done', 'post_id' => (int) $job['exists']], ['url' => $job['url']]);
+            $line = 'قبلاً ثبت شده بود: ' . $job['title'] . ' (پست ' . (int) $job['exists'] . ')';
         } elseif (!empty($job['skipped'])) {
             // script.php قبل از ساختن پست فهمیده صفحه لینک فایل آهنگ ندارد (آلبوم/ویدیو) → دیگر تکرار نمی‌شود
             $wpdb->update($job['table'], ['status' => 'skipped'], ['url' => $job['url']]);
@@ -171,6 +234,11 @@ function bm_auto_finish() {
                     ? 'وقتی آیتم جدیدی در فهرست نباشد دوباره امتحان می‌شود (تلاش ' . $attempts . ' از ' . $job['max_attempts'] . ').'
                     : 'بعد از ' . $job['max_attempts'] . ' تلاش کنار گذاشته شد.');
         }
+    }
+
+    if (!empty($GLOBALS['bm_auto_locked'])) {
+        // فقط اجراهایی که واقعاً شروع شده‌اند (قفل را گرفته‌اند) «آخرین اجرا» حساب می‌شوند — نه اجراهای ردشده با قفل
+        update_option('bm_auto_last', ['time' => time(), 'text' => mb_substr(wp_strip_all_tags($line), 0, 300)], false);
     }
 
     if (!empty($GLOBALS['bm_auto_quiet'])) {
@@ -186,7 +254,7 @@ function bm_auto_finish() {
 
 /* -------------------------------------------------------
  |  1) دسترسی
- |  - یوزر/رمز فرستاده شده یا ?report=1 → باید درست باشد (گزارش کامل)
+ |  - یوزر/رمز فرستاده شده یا ?report=1 یا ?unlock=1 → باید درست باشد (گزارش کامل / آزاد کردن قفل)
  |  - بدون یوزر/رمز ولی BM_AUTH_PASS روی سرور تعریف شده → اجرا مجاز است، فقط خلاصه چاپ می‌شود (کران)
  |  - در غیر این صورت → 401
  * ------------------------------------------------------ */
@@ -194,7 +262,7 @@ $bm_server_pass = (defined('BM_AUTH_PASS') && (string) BM_AUTH_PASS !== '') || (
 list($bm_req_user) = bm_auth_request_credentials();
 $bm_quiet = false;
 
-if ($bm_req_user !== null || isset($_GET['report']) || !$bm_server_pass) {
+if ($bm_req_user !== null || isset($_GET['report']) || isset($_GET['unlock']) || !$bm_server_pass) {
     if ($bm_req_user === null && !$bm_server_pass && PHP_SAPI !== 'cli') {
         // زیر صفحه‌ی 401 دلیل لازم بودن یوزر/رمز را هم نشان بده (برای عیب‌یابی)
         register_shutdown_function(function () {
@@ -214,6 +282,7 @@ $GLOBALS['bm_auto_quiet']   = $bm_quiet;
 $GLOBALS['bm_auto_summary'] = '';
 $GLOBALS['bm_auto_job']     = null;
 $GLOBALS['bm_auto_locked']  = false;
+$GLOBALS['bm_auto_started'] = 0;
 register_shutdown_function('bm_auto_finish');
 
 if ($bm_quiet) {
@@ -228,14 +297,53 @@ if (bm_auth_userpwd() === '') {
         . 'یا BM_AUTH_PASS را در wp-config.php تعریف کنید یا کران را با یوزر/رمز ربات صدا بزنید.');
 }
 
-if (get_transient('bm_auto_lock')) {
-    bm_auto_stop('اجرای قبلی هنوز تمام نشده است؛ این اجرا رد شد.');
-}
-set_transient('bm_auto_lock', time(), $lock_minutes * 60);
-$GLOBALS['bm_auto_locked'] = true;
-
 global $wpdb;
 bm_auto_prepare_table($wpdb, $subcheck_table);
+
+/* قفل اجراهای هم‌زمان: هر اجرا یک آهنگ ثبت می‌کند و ۱ تا ۵ دقیقه طول می‌کشد (خواندن صفحه‌ی مبدأ، کاور، انتقال فایل‌ها به
+   هاست دانلود). اگر اجرایی وسط کار قطع شود (مثلاً سرور پروسه را بکشد) قفل خودش بعد از $lock_minutes دقیقه آزاد می‌شود و
+   آیتمی که pending مانده در اجرای بعدی failed می‌شود تا دوباره امتحان شود. auto.php?unlock=1 (با یوزر/رمز) قفل را همین حالا آزاد می‌کند. */
+$bm_lock = bm_auto_lock_info();
+if (isset($_GET['unlock']) && !$bm_quiet) { // ?unlock=1 همیشه یوزر/رمز می‌خواهد (بخش ۱)؛ !$bm_quiet فقط محض اطمینان
+    if ($bm_lock === null) {
+        bm_auto_stop('قفلی وجود نداشت؛ اجرای بعدی (کران یا باز کردن auto.php) طبق معمول انجام می‌شود.');
+    }
+    delete_transient('bm_auto_lock');
+    delete_option('bm_auto_running');
+    if ($bm_lock['url'] !== '') {
+        // آیتم آن اجرا اگر هنوز pending است، failed می‌شود تا (وقتی آیتم جدیدی نباشد) دوباره امتحان شود
+        $wpdb->update($subcheck_table, ['status' => 'failed'], ['url' => $bm_lock['url'], 'status' => 'pending']);
+    }
+    bm_auto_stop('قفل اجرای قبلی آزاد شد (شروع ' . bm_auto_age_text(time() - $bm_lock['time'])
+        . ($bm_lock['title'] !== '' ? ' — در حال ثبت «' . $bm_lock['title'] . '»' : '') . ').'
+        . ($bm_lock['url'] !== '' ? ' اگر آن آهنگ ثبت نشده باشد، وقتی آیتم جدیدی در فهرست نباشد دوباره امتحان می‌شود.' : '')
+        . ' اجرای بعدی (کران یا باز کردن auto.php) طبق معمول انجام می‌شود.');
+}
+if ($bm_lock !== null) {
+    $bm_lock_age = $bm_lock['time'] > 0 ? time() - $bm_lock['time'] : 0;
+    bm_auto_stop('اجرای قبلی هنوز تمام نشده است (شروع ' . bm_auto_age_text($bm_lock_age)
+        . ($bm_lock['title'] !== '' ? ' — در حال ثبت «' . $bm_lock['title'] . '»' : '') . ')؛ این اجرا رد شد.'
+        . ' هر اجرا یک آهنگ ثبت می‌کند و معمولاً ۱ تا ۵ دقیقه طول می‌کشد؛ کران هر ۵ دقیقه دوباره امتحان می‌کند.'
+        . ' اگر اجرای قبلی قطع شده باشد، قفل خودش حداکثر ' . max(0, $lock_minutes - (int) floor($bm_lock_age / 60)) . ' دقیقه‌ی دیگر آزاد می‌شود'
+        . (!$bm_quiet ? ' — یا اگر مطمئنی قطع شده، همین حالا: auto.php?unlock=1' : '') . '.'
+        . (bm_auto_last_text() !== '' ? ' ' . bm_auto_last_text() . '.' : ''));
+}
+bm_auto_lock_set();
+
+/* آیتمی که از اجرای قطع‌شده‌ی قبلی pending مانده → failed، تا دوباره امتحان شود. فقط وقتی مطمئنیم آن اجرا زنده نیست:
+   bm_auto_running با شروع ثبت هر آیتم نوشته و در پایان پاک می‌شود؛ قفل منقضی شده ولی یک اجرای خیلی کند (set_time_limit(0))
+   می‌تواند هنوز زنده باشد و نباید همان آهنگ دو بار ثبت شود. بدون این نشانه (نسخه‌ی قدیمی) یا بعد از ۳۰ دقیقه → قطعاً مرده. */
+$bm_running     = get_option('bm_auto_running');
+$bm_running_age = (is_array($bm_running) && !empty($bm_running['time'])) ? time() - (int) $bm_running['time'] : PHP_INT_MAX;
+if ($bm_running_age >= max(30, 3 * $lock_minutes) * 60) {
+    $bm_orphans = (int) $wpdb->query("UPDATE {$subcheck_table} SET status = 'failed' WHERE status = 'pending'");
+    if (is_array($bm_running)) {
+        delete_option('bm_auto_running');
+    }
+    if ($bm_orphans > 0) {
+        echo '<p>' . $bm_orphans . ' آیتم از اجرای قطع‌شده‌ی قبلی (pending مانده بود) به failed برگشت؛ وقتی آیتم جدیدی در فهرست نباشد دوباره امتحان می‌شود.</p>';
+    }
+}
 
 /* -------------------------------------------------------
  |  3) فهرست آیتم‌های جدید (فید RSS/Atom یا نقشه‌ی سایت؛ اولین منبعی که آیتم داشت)
@@ -344,6 +452,8 @@ $GLOBALS['bm_auto_job'] = [
     'done'         => false,
     'post_id'      => 0,
 ];
+
+bm_auto_lock_set($candidate, $items[$candidate]); // پیام قفل برای اجراهای هم‌زمان: «در حال ثبت …»
 
 echo '<p>در حال ثبت: <a href="' . esc_url($candidate) . '">' . $items[$candidate] . '</a>' . ($retry ? ' (تلاش دوباره)' : '') . '</p>';
 
